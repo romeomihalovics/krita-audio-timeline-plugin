@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=audiotimeline
+X-Python-2-Compatible=false
+X-Krita-Manual=
+Name=Audio Timeline
+Comment=Multi-track audio timeline docker, synced with Krita's animation timeline
