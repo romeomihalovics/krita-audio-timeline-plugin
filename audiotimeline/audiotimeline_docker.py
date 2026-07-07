@@ -103,6 +103,12 @@ class AudioTimelineDocker(DockWidget):
         # rather than starting an overlapping render.
         self._mixdown_thread = None
         self._mixdown_pending_doc = None
+        # None = not checked yet; True/False once the first real Document
+        # tells us whether this Krita build has the setAudioTracks()/
+        # audioTracks() API at all (added in Krita 5.3/6.0 -- absent on
+        # 5.2.x and earlier). Checked lazily rather than at import time
+        # since it needs an actual Document instance to probe.
+        self._audio_api_supported = None
 
         self._build_undo_redo_actions()
         self._build_ui()
@@ -541,6 +547,31 @@ class AudioTimelineDocker(DockWidget):
         self._known_mixdown_paths.add(path)
         return path
 
+    def _audio_api_available(self, doc):
+        """Checks (once, caching the result) whether this Krita build
+        exposes Document.setAudioTracks()/audioTracks() at all -- that API
+        was only added in Krita 5.3/6.0, so it's simply missing on 5.2.x
+        and earlier. Rather than let every call site hit a raw
+        AttributeError, warn about it once up front and have callers skip
+        the Krita-side attach/clear from then on; the mixdown WAV is still
+        rendered to disk regardless, just not handed to Krita automatically."""
+        if self._audio_api_supported is None:
+            self._audio_api_supported = hasattr(doc, "setAudioTracks") and hasattr(doc, "audioTracks")
+            if not self._audio_api_supported:
+                QMessageBox.warning(
+                    None, "Audio Timeline",
+                    "This Krita build doesn't support Document.setAudioTracks() / "
+                    "audioTracks() -- that API was only added in Krita 5.3 / 6.0. "
+                    "You appear to be on an older build (e.g. 5.2.x).\n\n"
+                    "Audio Timeline will still let you arrange clips and will keep "
+                    "rendering the mixed-down WAV to your temp folder, but it can't "
+                    "hand that audio to Krita's native playback engine on this "
+                    "version -- update Krita to 5.3.2+ or 6.0+ for that, or import "
+                    "the rendered WAV manually via Krita's own \"Import Audio for "
+                    "Animation\"."
+                )
+        return self._audio_api_supported
+
     def _mixdown_already_attached(self, doc):
         """True if Krita's built-in Document.audioTracks() already has
         something set for this doc -- whether that's our own mixdown from
@@ -548,6 +579,8 @@ class AudioTimelineDocker(DockWidget):
         a document shouldn't cost a re-render when it already has audio
         attached; a real edit (_on_content_changed) always re-renders
         regardless of this check."""
+        if not self._audio_api_available(doc):
+            return False
         try:
             current = doc.audioTracks()
         except Exception:
@@ -600,6 +633,8 @@ class AudioTimelineDocker(DockWidget):
             self._render_and_apply_mixdown(doc)
 
     def _apply_mixdown_to_krita(self, doc, path):
+        if not self._audio_api_available(doc):
+            return
         try:
             doc.setAudioTracks([path])
             if doc.audioLevel() <= 0.0:
@@ -614,6 +649,8 @@ class AudioTimelineDocker(DockWidget):
             )
 
     def _clear_krita_audio(self, doc):
+        if not self._audio_api_available(doc):
+            return
         try:
             doc.setAudioTracks([])
         except Exception as exc:

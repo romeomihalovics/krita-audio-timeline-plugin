@@ -9,6 +9,15 @@ A dockable multi-track audio timeline for Krita, synced with Krita's own
 animation timeline via polling. Drag audio clips around, scrub either
 timeline, and let the other one follow.
 
+## Requirements
+
+**Krita 5.3.2 or newer (or Krita 6.0+).** The plugin hands its mixed-down
+audio to Krita via `Document.setAudioTracks()`, which Krita only added in
+the 5.3/6.0 development cycle — it does not exist on Krita 5.2.x or
+earlier. On those older builds you'll get an `AttributeError` about
+`setAudioTracks` and clips won't play back through Krita's native audio
+engine; update Krita to fix this.
+
 ## Install
 
 1. Locate your Krita resources folder: **Settings → Manage Resources… →
