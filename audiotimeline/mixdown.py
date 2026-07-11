@@ -20,6 +20,8 @@ import wave
 from array import array
 from collections import namedtuple
 
+from . import volume_envelope
+
 try:
     import numpy as np
     HAVE_NUMPY = True
@@ -36,11 +38,15 @@ TARGET_SAMPLE_RATE = 44100
 TARGET_CHANNELS = 2
 
 # Plain, immutable stand-ins for AudioTrack/AudioClip -- render_mixdown only
-# ever reads .muted/.clips and .file_path/.start_frame off whatever it's
-# given, so a snapshot of just those fields is enough to run a render on a
-# background thread without touching the live (mutable) timeline objects
-# the UI thread keeps editing concurrently.
-_ClipSnapshot = namedtuple('_ClipSnapshot', 'file_path start_frame')
+# ever reads .muted/.clips and a handful of AudioClip fields off whatever
+# it's given, so a snapshot of just those fields is enough to run a render
+# on a background thread without touching the live (mutable) timeline
+# objects the UI thread keeps editing concurrently.
+_ClipSnapshot = namedtuple(
+    '_ClipSnapshot',
+    'file_path start_frame source_duration_sec trim_in_sec trim_out_sec '
+    'trim_in_floor_sec volume_points',
+)
 _TrackSnapshot = namedtuple('_TrackSnapshot', 'muted clips')
 
 
@@ -50,7 +56,14 @@ def snapshot_tracks(tracks):
     return [
         _TrackSnapshot(
             muted=track.muted,
-            clips=[_ClipSnapshot(c.file_path, c.start_frame) for c in track.clips],
+            clips=[
+                _ClipSnapshot(
+                    c.file_path, c.start_frame, c.source_duration_sec,
+                    c.trim_in_sec, c.trim_out_sec, c.trim_in_floor_sec,
+                    list(c.volume_points),
+                )
+                for c in track.clips
+            ],
         )
         for track in tracks
     ]
@@ -118,10 +131,91 @@ def _resample(samples, src_rate, dst_rate):
     return out
 
 
-def _prepare_clip(path, target_rate):
+def _prepare_clip(path, target_rate, trim_in_sec, trim_out_sec, source_duration_sec):
     chans, rate = _decode_file(path)
     chans = _to_stereo(chans)
-    return [_resample(ch, rate, target_rate) for ch in chans]
+    chans = [_resample(ch, rate, target_rate) for ch in chans]
+
+    # Trim to the played region only, at the (now-resampled) mix sample
+    # rate -- trim_in_sec/trim_out_sec are relative to the *source* file,
+    # same clock as source_duration_sec.
+    trim_start = max(0, int(round(trim_in_sec * target_rate)))
+    trim_end_sec = max(trim_in_sec, source_duration_sec - trim_out_sec)
+    trim_end = max(trim_start, int(round(trim_end_sec * target_rate)))
+    return [ch[trim_start:trim_end] for ch in chans]
+
+
+def _apply_gain_envelope(chans, volume_points, trim_in_sec, trim_out_sec,
+                          source_duration_sec, trim_in_floor_sec):
+    """Scales each channel's samples by the gain envelope defined by
+    `volume_points` -- a list of (fraction, gain) points, `fraction` in
+    [0, 1] over the clip's permanent volume-envelope extent
+    (trim_in_floor_sec .. source_duration_sec, matching
+    AudioClip.played_fraction_to_extent_fraction -- NOT the played/
+    trimmed window `chans` itself covers), evaluated via the shared
+    volume_envelope.evaluate() (Catmull-Rom through >2 points, linear for
+    exactly 2) so the audible result matches the curve timeline_widget.py
+    draws exactly.
+
+    volume_envelope.evaluate() is only called at block boundaries, not per
+    sample -- for a long clip that's a large cost difference, and linearly
+    interpolating the per-sample gain between adjacent boundary gains is
+    indistinguishable from evaluating every sample for a smoothly-varying
+    envelope like this one."""
+    if not volume_points:
+        return chans
+    points = sorted(volume_points, key=lambda p: p[0])
+    if len(points) == 1:
+        gain = points[0][1]
+        if gain == 1.0:
+            return chans
+        if HAVE_NUMPY:
+            return [ch * gain for ch in chans]
+        return [array('d', (v * gain for v in ch)) for ch in chans]
+
+    n = max((len(ch) for ch in chans), default=0)
+    if n == 0:
+        return chans
+
+    played_duration = source_duration_sec - trim_in_sec - trim_out_sec
+    extent_duration = source_duration_sec - trim_in_floor_sec
+
+    def extent_fraction_at(played_fraction):
+        if extent_duration <= 0:
+            return 0.0
+        abs_time = trim_in_sec + played_fraction * played_duration
+        return (abs_time - trim_in_floor_sec) / extent_duration
+
+    block = 512
+    boundary_indices = list(range(0, n, block))
+    if boundary_indices[-1] != n - 1:
+        boundary_indices.append(n - 1)
+    boundary_gains = [
+        volume_envelope.evaluate(points, extent_fraction_at(i / float(n - 1) if n > 1 else 0.0))
+        for i in boundary_indices
+    ]
+
+    if HAVE_NUMPY:
+        idx = np.array(boundary_indices, dtype=np.float64)
+        gains_b = np.array(boundary_gains, dtype=np.float64)
+        gains = np.interp(np.arange(n, dtype=np.float64), idx, gains_b)
+        return [np.asarray(ch) * gains[:len(ch)] for ch in chans]
+
+    def gain_at_index(i):
+        for k in range(len(boundary_indices) - 1):
+            i0, i1 = boundary_indices[k], boundary_indices[k + 1]
+            if i0 <= i <= i1:
+                if i1 == i0:
+                    return boundary_gains[k]
+                t = (i - i0) / float(i1 - i0)
+                return boundary_gains[k] + (boundary_gains[k + 1] - boundary_gains[k]) * t
+        return boundary_gains[-1]
+
+    out = []
+    for ch in chans:
+        scaled = array('d', (v * gain_at_index(i) for i, v in enumerate(ch)))
+        out.append(scaled)
+    return out
 
 
 def _clamp16(x):
@@ -155,9 +249,17 @@ def render_mixdown(tracks, fps, total_frames, out_path, sample_rate=TARGET_SAMPL
             continue
         for clip in track.clips:
             try:
-                chans = _prepare_clip(clip.file_path, sample_rate)
+                chans = _prepare_clip(
+                    clip.file_path, sample_rate,
+                    clip.trim_in_sec, clip.trim_out_sec, clip.source_duration_sec,
+                )
             except Exception:
                 continue
+            chans = _apply_gain_envelope(
+                chans, clip.volume_points,
+                clip.trim_in_sec, clip.trim_out_sec,
+                clip.source_duration_sec, clip.trim_in_floor_sec,
+            )
 
             start_sample = int(round((clip.start_frame / float(fps)) * sample_rate))
             if start_sample >= total_samples:

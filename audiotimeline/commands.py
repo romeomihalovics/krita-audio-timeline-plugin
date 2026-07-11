@@ -1,5 +1,7 @@
 from PyQt5.QtWidgets import QUndoCommand
 
+from . import volume_envelope
+
 
 class AddTrackCommand(QUndoCommand):
     """Adds a new (empty) track and makes it the active one."""
@@ -135,6 +137,153 @@ class MoveClipCommand(QUndoCommand):
                 self.old_track.add_clip(self.clip)
         self.clip.start_frame = self.old_start_frame
         self.timeline.refresh_layout()
+        self.timeline.contentChanged.emit(self.affects_audio)
+
+
+class TrimClipCommand(QUndoCommand):
+    """Pushed once, on mouse release, at the end of an edge-drag -- the drag
+    itself has already live-mutated trim_in_sec/trim_out_sec/start_frame, so
+    redo()/undo() just need to (re)apply the recorded before/after values,
+    matching MoveClipCommand's guard pattern.
+
+    Never touches volume_points: a clip's bend points are stored relative
+    to its permanent extent (trim_in_floor_sec .. source_duration_sec, see
+    AudioClip.played_fraction_to_extent_fraction), not its current played
+    window, so an ordinary trim-edge drag changing only trim_in_sec/
+    trim_out_sec never needs to rewrite them -- a point trimmed out of
+    view reappears, unmodified, once the clip is trimmed back out."""
+
+    def __init__(self, timeline, clip, old_trim_in, old_trim_out, old_start_frame,
+                 new_trim_in, new_trim_out, new_start_frame):
+        super().__init__(f'Trim clip "{clip.name}"')
+        self.timeline = timeline
+        self.clip = clip
+        self.old = (old_trim_in, old_trim_out, old_start_frame)
+        self.new = (new_trim_in, new_trim_out, new_start_frame)
+        self.affects_audio = True
+
+    def redo(self):
+        self.clip.trim_in_sec, self.clip.trim_out_sec, self.clip.start_frame = self.new
+        self.timeline.refresh_layout()
+        self.timeline.contentChanged.emit(self.affects_audio)
+
+    def undo(self):
+        self.clip.trim_in_sec, self.clip.trim_out_sec, self.clip.start_frame = self.old
+        self.timeline.refresh_layout()
+        self.timeline.contentChanged.emit(self.affects_audio)
+
+
+class SplitClipCommand(QUndoCommand):
+    """Splits `clip` into two siblings at `split_frame` (a frame strictly
+    inside the clip). Only ever touches the one clip it's given -- the
+    track's other clips are untouched. redo() replaces the original clip
+    object with the two new sibling objects; undo() removes both and
+    restores the original single clip, so no other state (selection aside)
+    needs to change hands."""
+
+    def __init__(self, timeline, track, clip, split_frame):
+        super().__init__(f'Split clip "{clip.name}"')
+        self.timeline = timeline
+        self.track = track
+        self.clip = clip
+        self.index = track.clips.index(clip)
+
+        # split_offset_sec is how far into the clip's *current* (already-
+        # trimmed) audio the split falls; split_point_sec is that same
+        # position but measured from the absolute start of the source file
+        # (i.e. in the same units as trim_in_sec/source_duration_sec).
+        split_offset_sec = (split_frame - clip.start_frame) / float(clip.fps)
+        split_point_sec = clip.trim_in_sec + split_offset_sec
+
+        # Each sibling's ceiling/floor is walled off at the cut so neither
+        # can be re-trimmed back out into the other's territory (which would
+        # duplicate audio) -- see clone_for_split's docstring.
+        self.left = clip.clone_for_split(
+            trim_in_sec=clip.trim_in_sec,
+            trim_out_sec=0.0,
+            start_frame=clip.start_frame,
+            source_duration_sec=split_point_sec,
+            trim_in_floor_sec=clip.trim_in_floor_sec,
+        )
+        self.right = clip.clone_for_split(
+            trim_in_sec=split_point_sec,
+            trim_out_sec=clip.trim_out_sec,
+            start_frame=split_frame,
+            source_duration_sec=clip.source_duration_sec,
+            trim_in_floor_sec=split_point_sec,
+        )
+
+        # clone_for_split() just copies volume_points verbatim onto both
+        # siblings -- fine when there are only the two (always-equal) flat
+        # endpoints, but a multi-point envelope's fractions are relative to
+        # the *original* clip's permanent extent (trim_in_floor_sec ..
+        # source_duration_sec, not its played window -- see
+        # AudioClip.played_fraction_to_extent_fraction), so left/right need
+        # to be remapped onto each sibling's own (now permanently walled-
+        # off, per clone_for_split above) extent instead, or an interior
+        # bend point would land at the wrong relative position -- or
+        # outside the sibling's span entirely -- on each half. Unlike an
+        # ordinary trim, a split permanently narrows each sibling's extent
+        # (its own trim_in_floor_sec/source_duration_sec), so points
+        # outside the kept half are genuinely gone for that sibling (only
+        # undo, not re-trimming, brings them back).
+        orig_extent_duration = clip.source_duration_sec - clip.trim_in_floor_sec
+        split_extent_frac = (
+            (split_point_sec - clip.trim_in_floor_sec) / orig_extent_duration
+            if orig_extent_duration > 0 else 0.5
+        )
+        self.left.volume_points = volume_envelope.split(clip.volume_points, split_extent_frac, keep_left=True)
+        self.right.volume_points = volume_envelope.split(clip.volume_points, split_extent_frac, keep_left=False)
+        self.affects_audio = True
+
+    def redo(self):
+        if self.clip in self.track.clips:
+            idx = self.track.clips.index(self.clip)
+            self.track.clips[idx:idx + 1] = [self.left, self.right]
+        self.timeline.selected_clip = self.left
+        if self.timeline.volume_editing_clip is self.clip:
+            # Same reasoning as _delete_clip: the original clip object is
+            # gone from track.clips, so there's nothing to revert to --
+            # just drop the editing-mode state directly.
+            self.timeline.volume_editing_clip = None
+            self.timeline._volume_edit_entry_points = None
+        self.timeline.refresh_layout()
+        self.timeline.contentChanged.emit(self.affects_audio)
+
+    def undo(self):
+        if self.left in self.track.clips:
+            idx = self.track.clips.index(self.left)
+            self.track.clips[idx:idx + 2] = [self.clip]
+        self.timeline.selected_clip = self.clip
+        if self.timeline.volume_editing_clip in (self.left, self.right):
+            self.timeline.volume_editing_clip = None
+            self.timeline._volume_edit_entry_points = None
+        self.timeline.refresh_layout()
+        self.timeline.contentChanged.emit(self.affects_audio)
+
+
+class SetClipVolumeCommand(QUndoCommand):
+    """Pushed once, on mouse release, at the end of a volume-line drag (or
+    a phase-2 point add/move/remove) -- the drag has already live-mutated
+    clip.volume_points, so redo()/undo() just (re)apply the recorded
+    before/after list, matching MoveClipCommand's guard pattern."""
+
+    def __init__(self, timeline, clip, old_points, new_points):
+        super().__init__(f'Adjust volume of "{clip.name}"')
+        self.timeline = timeline
+        self.clip = clip
+        self.old_points = old_points
+        self.new_points = new_points
+        self.affects_audio = True
+
+    def redo(self):
+        self.clip.volume_points = list(self.new_points)
+        self.timeline.update()
+        self.timeline.contentChanged.emit(self.affects_audio)
+
+    def undo(self):
+        self.clip.volume_points = list(self.old_points)
+        self.timeline.update()
         self.timeline.contentChanged.emit(self.affects_audio)
 
 
