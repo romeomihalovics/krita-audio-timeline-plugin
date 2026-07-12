@@ -43,37 +43,55 @@ engine; update Krita to fix this.
 
 <p align="center">
   <img src="screenshots/1.png" width="49%" alt="Audio Timeline docker screenshot 1" />
-  <img src="screenshots/2.png" width="49%" alt="Audio Timeline docker screenshot 2" />
-  <br/>
-  <img src="screenshots/3.png" width="49%" alt="Audio Timeline docker screenshot 3" />
-  <img src="screenshots/4.png" width="49%" alt="Audio Timeline docker screenshot 4" />
+  <img src="screenshots/2.png" width="49%%" alt="Audio Timeline docker screenshot 2" />
 </p>
 
-- **Adapts to your Krita theme.**
-- **Add Track** creates a new lane.
-- **Import Audio…** loads an audio clip starting at the current playhead
-  frame (see [Supported audio formats](#supported-audio-formats) below).
-- Click/drag in the **ruler** (top strip) or empty lane space to scrub —
-  this calls `Document.setCurrentTime()`, so Krita's own canvas and native
-  timeline follow along.
-- Drag a **clip** to move it earlier/later, or onto a different track.
-  Clips can't be dropped on top of each other — the plugin nudges them
-  into the nearest free gap instead.
-- Double-click a track's name to **rename** it; the small button in a
-  track's header deletes it.
-- Select a clip and press **Delete/Backspace**, or right-click it, to
-  remove it.
-- **Ctrl + scroll** zooms the timeline horizontally.
-- **Mute** a track with the small **Audio** button in its header — this
-  actually removes it from the next mixdown (see below), not just a
-  local UI toggle.
-- Its own **Undo/Redo** buttons and Ctrl+Z/Ctrl+Y shortcuts, independent
-  of Krita's canvas undo history (see [Undo/redo](#undo-redo-is-not-kritas-own) below).
-- Playback itself is handled entirely by **Krita's own native audio
-  engine**, the same one behind "Import Audio for Animation" — see
-  [How playback audio actually works](#how-playback-audio-actually-works-mixdown--kritas-native-audio-track)
-  below. This docker's job is purely to manage the virtual multi-track
-  layout and keep Krita's single audio track in sync with it.
+This same list is also available in-app: click the **info (i) icon** in the
+docker's title bar, just left of the settings cog.
+
+| Feature | How to use it |
+| --- | --- |
+| **Add Track** | Click the button to add a new empty lane. |
+| **Import Audio** | Loads a clip starting at the current playhead frame. `.wav` always works — see [Supported audio formats](#supported-audio-formats). |
+| **Copy / paste a clip** | Select a clip and press **Ctrl+C** (or right-click it → **Copy Clip**), then **Ctrl+V** (or right-click empty space → **Paste**) — duplicates it (trim, split, volume envelope and all) onto the active track at the playhead, or at the right-clicked position, nudged clear of anything already there, same as importing. Copying a clip clears anything on the system clipboard, since that otherwise takes priority — see below. |
+| **Drag & drop from outside Krita** | **Drag an audio file** from your OS file manager and drop it onto the timeline — imports it at the drop position/track. |
+| **Paste a file from outside Krita** | **Ctrl+V** (or right-click empty space → **Paste**) pastes audio file(s) currently on the system clipboard (e.g. copied in the OS file manager) — this always takes priority over a clip copied inside the timeline, if both are present. |
+| **Scrub** | Click/drag the **ruler** (top strip) or empty lane space. Krita's canvas and native timeline follow along. |
+| **Move a clip** | **Drag** it earlier/later, or onto another track. Clips can't overlap — dropping one onto another nudges it into the nearest free gap. |
+| **Trim a clip** | **Drag its left/right edge** to shorten or lengthen it. |
+| **Split a clip** | Select it, then press **S** (or the scissors button) to cut it in two at the playhead. |
+| **Select / delete a clip** | **Click** to select; **Delete/Backspace** or **right-click** to remove. |
+| **Rename / delete a track** | **Double-click** a track's name to rename it; the small button in its header deletes it. |
+| **Mute a track** | Click the **Audio** button in its header — actually drops it from the next mixdown, not just a UI toggle. |
+| **Zoom** | **Ctrl + scroll** zooms the timeline horizontally. |
+| **Volume editing** | Click a clip's **volume icon** to enter editing mode; **drag the flat line** up/down to set its overall gain. |
+| **Add a volume point** | **Double-click** anywhere on the volume line to insert a bend point there. |
+| **Move a volume point** | **Drag** an existing point to reshape the gain curve. |
+| **Remove a volume point** | **Double-click** it, press **Delete** while it's selected, or **right-click → Remove Point**. Endpoints are permanent. |
+| **Set an exact gain** | **Double-click** a percentage readout to type in a precise value (up to 200%). |
+| **Exit volume editing** | Click the **Apply/Cancel** icons, or press **Escape** to discard changes made this session. |
+| **Undo / Redo** | **Ctrl+Z / Ctrl+Y**, or the docker's own buttons — its own history, independent of Krita's canvas undo (see [Undo/redo](#undo-redo-is-not-kritas-own)). |
+| **Auto update** | The **cog icon** opens Settings, with a "Check for Updates" button and a toggle for automatic startup checks — see [Update checking](#update-checking). |
+| **Adapts to your Krita theme** | No setup needed. |
+
+Playback itself is handled entirely by **Krita's own native audio
+engine**, the same one behind "Import Audio for Animation" — see
+[How playback audio actually works](#how-playback-audio-actually-works-mixdown--kritas-native-audio-track)
+below. This docker's job is purely to manage the virtual multi-track
+layout and keep Krita's single audio track in sync with it.
+
+## Update checking
+
+On startup (after a short delay), if "Automatically check for updates" is
+enabled in Settings (on by default), the plugin makes one background check
+against this repo's latest GitHub release. If a newer version is
+available, a dialog prompts you to install it (with a "Don't show again"
+option that disables the automatic check without affecting the manual
+one). You can also check manually any time via the cog icon → **Check for
+Updates**. Installing an update overwrites the plugin's files in place;
+**restart Krita afterwards** for the new code to actually take effect —
+your `update_settings.json` preference (auto-check on/off) is preserved
+across the update.
 
 ## How the sync actually works
 
@@ -200,10 +218,16 @@ in order:
    of the plugin are a classic cause of "I fixed the bug but it's still
    broken."
 
-## Where to take it from here
+## Releasing
 
-- Clip trimming & splitting.
-- Per-track volume curves.
+The update checker compares `audiotimeline/plugin_meta.json`'s `version`
+against this repo's latest GitHub release tag, so:
+
+1. Bump the `version` field in `audiotimeline/plugin_meta.json`.
+2. Commit that change.
+3. Tag and push a GitHub release with a matching `vX.Y.Z` tag (the tag's
+   auto-generated source zip is what gets downloaded by the updater —
+   no binary assets need to be attached).
 
 ## Background & related reading
 

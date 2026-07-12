@@ -25,6 +25,10 @@ from .timeline_widget import (
 from .audio_track import AudioTrack, AudioClip
 from . import mixdown
 from . import commands
+from . import updater
+from .update_dialog import UpdateDialog
+from .settings_dialog import SettingsDialog
+from .info_dialog import InfoDialog
 
 POLL_INTERVAL_MS = 40           # ~25 checks/sec; matches typical playback tick rate
 ANNOTATION_KEY = "audiotimeline/state"
@@ -122,6 +126,11 @@ class AudioTimelineDocker(DockWidget):
         self._mixdown_spinner_timer = QTimer(self)
         self._mixdown_spinner_timer.setInterval(SPINNER_INTERVAL_MS)
         self._mixdown_spinner_timer.timeout.connect(self._tick_mixdown_spinner)
+
+        self._update_check_thread = None
+        # Delay avoids competing with Krita's own startup work / other
+        # docker initialization.
+        QTimer.singleShot(3000, self._maybe_auto_check_for_updates)
 
     # ------------------------------------------------------------------ UI
     def _build_undo_redo_actions(self):
@@ -356,6 +365,35 @@ class AudioTimelineDocker(DockWidget):
 
         title_layout.addStretch(1)
 
+        self._info_btn = QToolButton()
+        self._info_btn.setAutoRaise(True)
+        self._info_btn.setToolTip("Feature List")
+        self._info_btn.setIcon(self._krita_icon("system-help", QStyle.SP_MessageBoxInformation))
+        self._info_btn.clicked.connect(self._open_info_dialog)
+        title_layout.addWidget(self._info_btn)
+
+        self._settings_btn = QToolButton()
+        self._settings_btn.setAutoRaise(True)
+        self._settings_btn.setToolTip("Audio Timeline Settings")
+        self._settings_btn.setIcon(self._krita_icon("configure", QStyle.SP_FileDialogDetailedView))
+        self._settings_btn.clicked.connect(self._open_settings_dialog)
+        title_layout.addWidget(self._settings_btn)
+
+        self._split_btn = QToolButton()
+        self._split_btn.setAutoRaise(True)
+        self._split_btn.setToolTip("Split Selected Clip at Playhead (S)")
+        # "edit-cut" is Krita's own scissors glyph (used for Edit > Cut).
+        self._split_btn.setIcon(self._krita_icon("edit-cut", QStyle.SP_DialogResetButton))
+        can_split = self.timeline.can_split_selected_clip()
+        self._split_btn.setEnabled(can_split)
+        self._split_btn.clicked.connect(self.timeline.split_selected_clip)
+        self._split_btn_opacity = QGraphicsOpacityEffect(self._split_btn)
+        self._split_btn_opacity.setOpacity(1.0 if can_split else 0.35)
+        self._split_btn.setGraphicsEffect(self._split_btn_opacity)
+        self.timeline.selectionChanged.connect(self._update_split_btn_enabled)
+        self.timeline.frameChanged.connect(self._update_split_btn_enabled)
+        title_layout.addWidget(self._split_btn)
+
         undo_btn = QToolButton()
         undo_btn.setAutoRaise(True)
         undo_btn.setDefaultAction(self._undo_action)
@@ -396,6 +434,14 @@ class AudioTimelineDocker(DockWidget):
         if not checked:
             features |= QDockWidget.DockWidgetMovable
         self.setFeatures(features)
+
+    def _update_split_btn_enabled(self, *_args):
+        # Re-evaluated on both selection and playhead changes -- the split
+        # button needs the playhead strictly inside the selected clip, not
+        # just a clip being selected (see can_split_selected_clip).
+        enabled = self.timeline.can_split_selected_clip()
+        self._split_btn.setEnabled(enabled)
+        self._split_btn_opacity.setOpacity(1.0 if enabled else 0.35)
 
     def _dim_when_disabled(self, button, enabled_changed_signal, initially_enabled):
         # QToolButton's built-in disabled rendering depends on the icon
@@ -493,6 +539,35 @@ class AudioTimelineDocker(DockWidget):
             if state['doc_id'] == self._loaded_doc_id:
                 state['active_track_index'] = self.timeline.active_track_index
                 break
+
+    # -------------------------------------------------------------- updates
+    def _open_settings_dialog(self):
+        SettingsDialog(self).exec_()
+
+    def _open_info_dialog(self):
+        InfoDialog(self).exec_()
+
+    def _maybe_auto_check_for_updates(self):
+        if updater.auto_check_already_done_this_session():
+            return
+        updater.mark_auto_check_done_this_session()
+        if not updater.load_update_settings()["auto_check_updates"]:
+            return
+
+        thread = updater.UpdateCheckWorker(self)
+        thread.checked.connect(self._on_auto_check_checked)
+        thread.failed.connect(self._on_auto_check_failed)
+        self._update_check_thread = thread
+        thread.start()
+
+    def _on_auto_check_checked(self, info):
+        if info is None:
+            return  # already up to date -- automatic checks are silent unless there's an update
+        dialog = UpdateDialog(self, automatic=True, release_info=info)
+        dialog.exec_()
+
+    def _on_auto_check_failed(self, _message):
+        pass  # automatic checks fail silently; only the manual flow surfaces errors
 
     # ------------------------------------------------------------- actions
     def add_track(self):
@@ -671,6 +746,11 @@ class AudioTimelineDocker(DockWidget):
                             "file_path": clip.file_path,
                             "start_frame": clip.start_frame,
                             "fps": clip.fps,
+                            "source_duration_sec": clip.source_duration_sec,
+                            "trim_in_sec": clip.trim_in_sec,
+                            "trim_out_sec": clip.trim_out_sec,
+                            "trim_in_floor_sec": clip.trim_in_floor_sec,
+                            "volume_points": [list(p) for p in clip.volume_points],
                         }
                         for clip in track.clips
                     ],
@@ -752,6 +832,19 @@ class AudioTimelineDocker(DockWidget):
                     )
                 except Exception:
                     continue
+                # source_duration_sec may have been capped by a prior split
+                # (see AudioClip.clone_for_split) -- restore that saved
+                # ceiling rather than trusting the freshly re-decoded full
+                # file duration, so a reloaded split clip still can't be
+                # trimmed back out past its cut point.
+                if "source_duration_sec" in clip_dict:
+                    clip.source_duration_sec = float(clip_dict["source_duration_sec"])
+                clip.trim_in_sec = float(clip_dict.get("trim_in_sec", 0.0))
+                clip.trim_out_sec = float(clip_dict.get("trim_out_sec", 0.0))
+                clip.trim_in_floor_sec = float(clip_dict.get("trim_in_floor_sec", 0.0))
+                volume_points = clip_dict.get("volume_points")
+                if volume_points:
+                    clip.volume_points = [tuple(p) for p in volume_points]
                 track.add_clip(clip)
             self.timeline.add_track(track)
 
