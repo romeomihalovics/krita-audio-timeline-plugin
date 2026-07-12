@@ -56,7 +56,7 @@ docker's title bar, just left of the settings cog.
 | **Copy / paste a clip** | Select a clip and press **Ctrl+C** (or right-click it → **Copy Clip**), then **Ctrl+V** (or right-click empty space → **Paste**) — duplicates it (trim, split, volume envelope and all) onto the active track at the playhead, or at the right-clicked position, nudged clear of anything already there, same as importing. Copying a clip clears anything on the system clipboard, since that otherwise takes priority — see below. |
 | **Drag & drop from outside Krita** | **Drag an audio file** from your OS file manager and drop it onto the timeline — imports it at the drop position/track. |
 | **Paste a file from outside Krita** | **Ctrl+V** (or right-click empty space → **Paste**) pastes audio file(s) currently on the system clipboard (e.g. copied in the OS file manager) — this always takes priority over a clip copied inside the timeline, if both are present. |
-| **Scrub** | Click/drag the **ruler** (top strip) or empty lane space. Krita's canvas and native timeline follow along. |
+| **Scrub** | Click/drag the **ANIMATION TIMELINE's** ruler or lane. Moves the playhead along with Krita's native timeline, while playing the audio. |
 | **Move a clip** | **Drag** it earlier/later, or onto another track. Clips can't overlap — dropping one onto another nudges it into the nearest free gap. |
 | **Trim a clip** | **Drag its left/right edge** to shorten or lengthen it. |
 | **Split a clip** | Select it, then press **S** (or the scissors button) to cut it in two at the playhead. |
