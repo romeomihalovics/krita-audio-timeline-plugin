@@ -15,10 +15,12 @@ fast path -- if it happens to be importable, mixing/resampling is
 vectorized; if not, the same math runs as plain Python loops.
 """
 
+import os
 import struct
+import threading
 import wave
 from array import array
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 from . import volume_envelope
 
@@ -131,10 +133,45 @@ def _resample(samples, src_rate, dst_rate):
     return out
 
 
-def _prepare_clip(path, target_rate, trim_in_sec, trim_out_sec, source_duration_sec):
+# Decoding + resampling a whole source file is the expensive,
+# file-size-proportional part of preparing a clip for mixdown; trimming and
+# gain (done after this) are cheap slice/scale ops. Since editing (trim/
+# move/split/volume) never changes the source file itself, the
+# decoded-and-resampled-to-target-rate channels are cached per
+# (path, mtime, size, target_rate) so repeated mixdowns after an edit to one
+# clip don't re-decode every *other* untouched clip's file again. Keyed on
+# mtime/size (not just path) so external edits to the file are still picked
+# up. Capped and evicted oldest-first so long sessions with many distinct
+# source files don't grow this unboundedly. Only one mixdown render runs at
+# a time today, but the lock keeps this safe regardless.
+_PCM_CACHE_MAX_ENTRIES = 64
+_pcm_cache = OrderedDict()
+_pcm_cache_lock = threading.Lock()
+
+
+def _decode_and_resample_cached(path, target_rate):
+    st = os.stat(path)
+    key = (path, st.st_mtime_ns, st.st_size, target_rate)
+    with _pcm_cache_lock:
+        cached = _pcm_cache.get(key)
+        if cached is not None:
+            _pcm_cache.move_to_end(key)
+            return cached
+
     chans, rate = _decode_file(path)
     chans = _to_stereo(chans)
     chans = [_resample(ch, rate, target_rate) for ch in chans]
+
+    with _pcm_cache_lock:
+        _pcm_cache[key] = chans
+        _pcm_cache.move_to_end(key)
+        while len(_pcm_cache) > _PCM_CACHE_MAX_ENTRIES:
+            _pcm_cache.popitem(last=False)
+    return chans
+
+
+def _prepare_clip(path, target_rate, trim_in_sec, trim_out_sec, source_duration_sec):
+    chans = _decode_and_resample_cached(path, target_rate)
 
     # Trim to the played region only, at the (now-resampled) mix sample
     # rate -- trim_in_sec/trim_out_sec are relative to the *source* file,
@@ -201,19 +238,29 @@ def _apply_gain_envelope(chans, volume_points, trim_in_sec, trim_out_sec,
         gains = np.interp(np.arange(n, dtype=np.float64), idx, gains_b)
         return [np.asarray(ch) * gains[:len(ch)] for ch in chans]
 
-    def gain_at_index(i):
-        for k in range(len(boundary_indices) - 1):
+    # Interpolates a full per-sample gain list once, in a single O(n) pass
+    # (samples are visited in order, so the boundary segment only ever
+    # advances forward) rather than re-scanning boundary_indices from the
+    # start for every sample.
+    if len(boundary_indices) == 1:
+        gains = [boundary_gains[0]] * n
+    else:
+        gains = [0.0] * n
+        k = 0
+        last_k = len(boundary_indices) - 2
+        for i in range(n):
+            while k < last_k and i > boundary_indices[k + 1]:
+                k += 1
             i0, i1 = boundary_indices[k], boundary_indices[k + 1]
-            if i0 <= i <= i1:
-                if i1 == i0:
-                    return boundary_gains[k]
+            if i1 == i0:
+                gains[i] = boundary_gains[k]
+            else:
                 t = (i - i0) / float(i1 - i0)
-                return boundary_gains[k] + (boundary_gains[k + 1] - boundary_gains[k]) * t
-        return boundary_gains[-1]
+                gains[i] = boundary_gains[k] + (boundary_gains[k + 1] - boundary_gains[k]) * t
 
     out = []
     for ch in chans:
-        scaled = array('d', (v * gain_at_index(i) for i, v in enumerate(ch)))
+        scaled = array('d', (v * gains[i] for i, v in enumerate(ch)))
         out.append(scaled)
     return out
 
