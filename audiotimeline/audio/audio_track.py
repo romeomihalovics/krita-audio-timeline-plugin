@@ -1,31 +1,46 @@
 import os
 import uuid
 
-from .waveform_utils import analyze_audio_file
+from .waveform_utils import analyze_audio_file, probe_duration
 
 
 class AudioClip:
     """A single audio file placed on a track at a given start frame."""
 
-    def __init__(self, file_path, start_frame, fps):
+    def __init__(self, file_path, start_frame, fps, defer_analysis=False):
         self.id = str(uuid.uuid4())
         self.file_path = file_path
         self.name = os.path.basename(file_path)
         self.start_frame = start_frame
         self.fps = fps
 
-        info = analyze_audio_file(file_path, fps)
-        # The full, untrimmed duration of the source file -- the ceiling
-        # trim_in_sec/trim_out_sec can never eat past. `peaks` is analyzed
-        # once here over the whole file and never re-analyzed on trim.
-        self.source_duration_sec = info.duration_sec
-        # The true duration of the decoded source file, spanned by `peaks`.
-        # Unlike source_duration_sec, this is never overridden after a split
-        # -- it's what _trimmed_peaks must divide by to index into `peaks`,
-        # regardless of any trim-ceiling capping applied to source_duration_sec.
-        self.full_source_duration_sec = info.duration_sec
-        self.sample_rate = info.sample_rate
-        self.peaks = info.peaks  # list of (min, max) in [-1, 1]
+        if defer_analysis:
+            # Fast, decode-free duration probe only -- lets the clip appear
+            # at its correct full length and be moved/trimmed/split right
+            # away, without blocking on the (potentially slow) full peak
+            # decode. `peaks` stays None -- a "pending" waveform -- until a
+            # background analyze_audio_file() call finishes and something
+            # calls apply_analysis() with the result. Callers doing this
+            # must eventually call apply_analysis(); see
+            # waveform_worker.WaveformWorker for the background half.
+            duration_sec, sample_rate = probe_duration(file_path)
+            self.source_duration_sec = duration_sec
+            self.full_source_duration_sec = duration_sec
+            self.sample_rate = sample_rate
+            self.peaks = None
+        else:
+            info = analyze_audio_file(file_path, fps)
+            # The full, untrimmed duration of the source file -- the ceiling
+            # trim_in_sec/trim_out_sec can never eat past. `peaks` is analyzed
+            # once here over the whole file and never re-analyzed on trim.
+            self.source_duration_sec = info.duration_sec
+            # The true duration of the decoded source file, spanned by `peaks`.
+            # Unlike source_duration_sec, this is never overridden after a split
+            # -- it's what _trimmed_peaks must divide by to index into `peaks`,
+            # regardless of any trim-ceiling capping applied to source_duration_sec.
+            self.full_source_duration_sec = info.duration_sec
+            self.sample_rate = info.sample_rate
+            self.peaks = info.peaks  # list of (min, max) in [-1, 1]
 
         # Seconds clipped off the start/end of the source by edge-dragging.
         self.trim_in_sec = 0.0
@@ -42,6 +57,21 @@ class AudioClip:
         # not its current played/trimmed window, so ordinary trimming never
         # needs to rewrite them. Flat, unity gain by default.
         self.volume_points = [(0.0, 1.0), (1.0, 1.0)]
+
+    def apply_analysis(self, info):
+        """Backfills `peaks`/`sample_rate` once a background waveform decode
+        (started for a `defer_analysis=True` clip) finishes. Deliberately
+        does NOT touch source_duration_sec/full_source_duration_sec/
+        trim_*_sec -- those were already fixed by the fast probe at import
+        time and may have been further edited (trimmed, split) by the user
+        in the meantime; only the redraw-only peaks/sample_rate are pending
+        data. No-op if this clip already has peaks (e.g. it wasn't the
+        clip the analysis was originally for, just a same-file sibling
+        being backfilled that already got them some other way)."""
+        if self.peaks is not None:
+            return
+        self.peaks = info.peaks
+        self.sample_rate = info.sample_rate
 
     @property
     def duration_sec(self):

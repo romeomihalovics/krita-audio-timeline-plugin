@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QUndoCommand
 
-from . import volume_envelope
+from .audio import volume_envelope
 
 
 class AddTrackCommand(QUndoCommand):
@@ -62,6 +62,12 @@ class AddClipCommand(QUndoCommand):
     def redo(self):
         self.track.add_clip(self.clip)
         self.timeline.selected_clip = self.clip
+        # A redo (as opposed to the initial add) can land after this
+        # clip's background waveform decode already finished while it was
+        # undone -- see DeleteClipCommand.undo for why that leaves peaks
+        # permanently None otherwise.
+        if self.clip.peaks is None:
+            self.timeline.request_waveform(self.clip.file_path)
         self.timeline.refresh_layout()
         self.timeline.contentChanged.emit(self.affects_audio)
 
@@ -92,6 +98,12 @@ class DeleteClipCommand(QUndoCommand):
     def undo(self):
         self.track.clips.insert(self.index, self.clip)
         self.timeline.selected_clip = self.clip
+        # Its background waveform decode may have finished (and been
+        # skipped, since this clip wasn't on any track to backfill) while
+        # it was deleted -- re-request it so it doesn't stay pending
+        # forever now that it's back.
+        if self.clip.peaks is None:
+            self.timeline.request_waveform(self.clip.file_path)
         self.timeline.refresh_layout()
         self.timeline.contentChanged.emit(self.affects_audio)
 
@@ -241,6 +253,11 @@ class SplitClipCommand(QUndoCommand):
             idx = self.track.clips.index(self.clip)
             self.track.clips[idx:idx + 1] = [self.left, self.right]
         self.timeline.selected_clip = self.left
+        # Same re-request-on-return reasoning as DeleteClipCommand.undo --
+        # a redo can land after the shared source file's decode already
+        # finished while both siblings were undone away.
+        if self.left.peaks is None:
+            self.timeline.request_waveform(self.left.file_path)
         if self.timeline.volume_editing_clip is self.clip:
             # Same reasoning as _delete_clip: the original clip object is
             # gone from track.clips, so there's nothing to revert to --
@@ -255,6 +272,11 @@ class SplitClipCommand(QUndoCommand):
             idx = self.track.clips.index(self.left)
             self.track.clips[idx:idx + 2] = [self.clip]
         self.timeline.selected_clip = self.clip
+        # Same reasoning as SplitClipCommand.redo/DeleteClipCommand.undo --
+        # the original clip may have missed its own decode's backfill while
+        # it was replaced by the (already-backfilled) siblings.
+        if self.clip.peaks is None:
+            self.timeline.request_waveform(self.clip.file_path)
         if self.timeline.volume_editing_clip in (self.left, self.right):
             self.timeline.volume_editing_clip = None
             self.timeline._volume_edit_entry_points = None

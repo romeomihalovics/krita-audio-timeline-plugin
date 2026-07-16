@@ -152,7 +152,7 @@ def _copy_tree_skip_settings(src_dir, dest_dir):
 
 
 class UpdateCheckWorker(QThread):
-    """Mirrors _MixdownWorker's shape: calls fetch_latest_release_info() +
+    """Mirrors MixdownWorker's shape: calls fetch_latest_release_info() +
     is_update_available() off the UI thread, emits checked(dict_or_None)
     on success (None release info if already up to date, for a uniform
     "no update" signal) or failed(str) on exception."""

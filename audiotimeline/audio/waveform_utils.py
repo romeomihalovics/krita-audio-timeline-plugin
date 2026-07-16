@@ -25,6 +25,11 @@ try:
 except ImportError:
     HAVE_PYDUB = False
 
+try:
+    from pydub.utils import mediainfo as _pydub_mediainfo  # optional
+except ImportError:
+    _pydub_mediainfo = None
+
 
 class AudioInfo:
     def __init__(self, duration_sec, sample_rate, peaks):
@@ -156,6 +161,50 @@ def analyze_with_pydub(path, fps, num_buckets=None):
         num_buckets = _buckets_for_duration(duration_sec, fps)
     peaks = _normalize_peaks(_peaks_from_pcm(raw, sample_width, channels, num_buckets))
     return AudioInfo(duration_sec, sample_rate, peaks)
+
+
+def probe_duration(path):
+    """
+    Cheap (duration_sec, sample_rate) lookup that avoids decoding sample
+    data, so a newly-imported clip can be placed on the timeline at its
+    correct full length immediately, before the (potentially slow) full
+    peak analysis has run in the background.
+
+    For .wav this only reads the header via `wave` -- getnframes()/
+    getframerate() don't touch the sample data -- so it's effectively O(1)
+    regardless of file size. For everything else it shells out to a single
+    `ffprobe` call via pydub's `mediainfo()` (pydub is already a required
+    dependency for non-wav files, so this adds no new dependency), which
+    reads container metadata instead of decoding audio.
+
+    Raises RuntimeError (same message shape as analyze_audio_file) if
+    duration can't be determined cheaply, so callers can fall back to a
+    full synchronous analyze_audio_file() call.
+    """
+    lower = path.lower()
+    if lower.endswith('.wav'):
+        with wave.open(path, 'rb') as wf:
+            sample_rate = wf.getframerate()
+            n_frames = wf.getnframes()
+        duration_sec = n_frames / float(sample_rate) if sample_rate else 0.0
+        return duration_sec, sample_rate
+
+    if _pydub_mediainfo is not None:
+        info = _pydub_mediainfo(path)
+        try:
+            duration_sec = float(info['duration'])
+            sample_rate = int(float(info.get('sample_rate') or 0))
+        except (KeyError, TypeError, ValueError):
+            duration_sec = 0.0
+            sample_rate = 0
+        if duration_sec > 0:
+            return duration_sec, (sample_rate or 44100)
+
+    raise RuntimeError(
+        "This file isn't a .wav and pydub/ffprobe couldn't read its "
+        "duration, so it can't be quickly probed. Install pydub + ffmpeg "
+        "in Krita's Python environment, or convert the file to .wav first."
+    )
 
 
 def analyze_audio_file(path, fps, num_buckets=None):
