@@ -121,20 +121,49 @@ class ClipboardMixin:
         same source file were just imported/split/pasted at once)."""
         if file_path == self._waveform_inflight_path or file_path in self._waveform_queue:
             return
+        # Opportunistic: the file currently being decoded (if any) may have
+        # been orphaned by an edit since its decode started (its one clip
+        # deleted, or that add undone) -- this is the next point this
+        # bookkeeping gets touched, so check here rather than let an
+        # already-pointless decode run to completion and compete with
+        # whatever this new request is about to need decoded instead.
+        if (self._waveform_thread is not None and self._waveform_thread.isRunning()
+                and self._waveform_inflight_path is not None
+                and not self._file_still_needed(self._waveform_inflight_path)):
+            self._waveform_thread.cancel()
         self._waveform_queue.append(file_path)
         self._start_next_waveform_job()
+
+    def _file_still_needed(self, file_path):
+        """Whether any clip on any track still has pending (peaks is None)
+        waveform data for `file_path` -- used to skip/cancel decodes for
+        files no clip needs anymore (e.g. the import that requested one
+        was undone before the decode even started)."""
+        return any(
+            clip.file_path == file_path and clip.peaks is None
+            for track in self.tracks for clip in track.clips
+        )
 
     def _start_next_waveform_job(self):
         if self._waveform_thread is not None and self._waveform_thread.isRunning():
             return
-        if not self._waveform_queue:
+        file_path = None
+        while self._waveform_queue:
+            candidate = self._waveform_queue.pop(0)
+            if self._file_still_needed(candidate):
+                file_path = candidate
+                break
+            # Nothing needs this one anymore (e.g. its clip was deleted/
+            # undone while still queued, before a thread ever started for
+            # it) -- drop it instead of spending a decode on it.
+        if file_path is None:
             self._waveform_inflight_path = None
             return
-        file_path = self._waveform_queue.pop(0)
         self._waveform_inflight_path = file_path
         thread = WaveformWorker(file_path, self.fps, self)
         thread.succeeded.connect(self._on_waveform_ready)
         thread.failed.connect(self._on_waveform_failed)
+        thread.cancelled.connect(self._on_waveform_cancelled)
         self._waveform_thread = thread
         thread.start()
 
@@ -156,6 +185,11 @@ class ClipboardMixin:
         # mixdown), just without a waveform preview. A modal error here for
         # a background decode failure would be disruptive for what's a
         # purely cosmetic feature.
+        self._start_next_waveform_job()
+
+    def _on_waveform_cancelled(self, file_path):
+        # Routine, not an error -- see request_waveform's opportunistic
+        # cancel. No result to backfill; just move on to whatever's next.
         self._start_next_waveform_job()
 
     def wait_for_waveform_shutdown(self, timeout_ms=2000):

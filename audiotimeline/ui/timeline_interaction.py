@@ -162,6 +162,7 @@ class InteractionMixin:
                             self._drag_point_index = point_idx
                             self._drag_orig_volume_points = list(clip.volume_points)
                             self.update()
+                            self.mixdownInvalidated.emit()
                             return
                         # Missed every point -- deselect rather than leave
                         # a stale selection border on a point the user
@@ -177,6 +178,7 @@ class InteractionMixin:
                             self._drag_point_index = None
                             self._drag_orig_volume_points = list(clip.volume_points)
                             self.update()
+                            self.mixdownInvalidated.emit()
                             return
 
                 sticky_left, _sticky_right = self.visible_x_range()
@@ -226,6 +228,7 @@ class InteractionMixin:
                 self._drag_orig_trim_out = clip.trim_out_sec
                 self._drag_orig_end_frame = clip.end_frame
                 self.update()
+                self.mixdownInvalidated.emit()
                 return
             self.selected_clip = None
             if self.volume_editing_clip is not None:
@@ -279,6 +282,13 @@ class InteractionMixin:
             trim_in = self._drag_orig_trim_in + (new_start - self._drag_start_frame) / fps
             trim_in = max(trim_in_floor, min(trim_in, max_trim_in))
 
+            # Native mouse-move events fire far more often than the
+            # frame-quantized position actually changes (e.g. many pixels
+            # can round to the same frame at low zoom) -- skip the
+            # relayout/repaint cascade entirely when this tick didn't
+            # actually move anything, rather than re-doing it for a no-op.
+            if new_start == clip.start_frame and trim_in == clip.trim_in_sec:
+                return
             clip.trim_in_sec = trim_in
             clip.start_frame = new_start
             self._relayout()
@@ -309,6 +319,8 @@ class InteractionMixin:
             trim_out = clip.source_duration_sec - self._drag_orig_trim_in - new_length_frames / fps
             trim_out = max(0.0, min(trim_out, max_trim_out))
 
+            if trim_out == clip.trim_out_sec:
+                return
             clip.trim_out_sec = trim_out
             self._relayout()
         elif self._drag_mode == 'volume' and self._drag_clip is not None:
@@ -319,7 +331,7 @@ class InteractionMixin:
                 gain = self._volume_y_to_gain(clip_rect, pos.y())
                 gain = max(0.0, min(VOLUME_GAIN_MAX, gain))
                 if self._drag_point_index is None:
-                    clip.volume_points = [(0.0, gain), (1.0, gain)]
+                    new_points = [(0.0, gain), (1.0, gain)]
                 else:
                     points = list(clip.volume_points)
                     idx = self._drag_point_index
@@ -340,13 +352,20 @@ class InteractionMixin:
                         epsilon = min(1e-4, (next_frac - prev_frac) / 4.0)
                         new_frac = max(prev_frac + epsilon, min(next_frac - epsilon, new_frac))
                     points[idx] = (new_frac, gain)
-                    clip.volume_points = points
+                    new_points = points
+                # Same no-op gate as the trim/move branches -- a tick that
+                # lands on the same quantized gain/fraction as already set
+                # shouldn't force a repaint.
+                if new_points == clip.volume_points:
+                    return
+                clip.volume_points = new_points
                 self.update()
         elif self._drag_mode == 'clip' and self._drag_clip is not None:
             new_start = self.x_to_frame(pos.x()) - self._drag_offset_frames
             new_start = max(0, new_start)
 
             target_idx = self._clamped_track_index_at_y(pos.y())
+            track_changed = False
             if target_idx >= 0:
                 target_track = self.tracks[target_idx]
                 if target_track is not self._drag_track:
@@ -360,11 +379,18 @@ class InteractionMixin:
                     target_track.add_clip(self._drag_clip)
                     self._drag_track = target_track
                     self.set_active_track_index(target_idx)
+                    track_changed = True
 
             # clamp_move_start() excludes the clip itself by id, so this
             # applies the exact same overlap-avoidance/cascading rules used
             # for in-track moves, whether or not the track just changed.
-            self._drag_clip.start_frame = self._drag_track.clamp_move_start(self._drag_clip, new_start)
+            clamped_start = self._drag_track.clamp_move_start(self._drag_clip, new_start)
+            # No-op gate, same reasoning as the trim/volume branches above --
+            # skip the relayout/repaint entirely if neither the track nor
+            # the frame actually moved this tick.
+            if not track_changed and clamped_start == self._drag_clip.start_frame:
+                return
+            self._drag_clip.start_frame = clamped_start
             self._relayout()
 
     def mouseReleaseEvent(self, event):

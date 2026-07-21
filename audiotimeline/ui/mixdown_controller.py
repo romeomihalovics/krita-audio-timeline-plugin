@@ -96,9 +96,12 @@ class MixdownController:
         if self._thread is not None and self._thread.isRunning():
             # A render is already in flight for an earlier edit -- rather
             # than start a second one racing it (or block here until it's
-            # done), just remember to re-render once it finishes so the
-            # result reflects this latest edit too.
+            # done), remember to re-render once it stops, and ask it to
+            # cancel at its next checkpoint (see MixdownWorker.cancel())
+            # so this latest edit's render can start right away instead of
+            # waiting out a result that's already stale.
             self._pending_doc = doc
+            self._thread.cancel()
             return
 
         mixdown_path = self.mixdown_path_for(doc)
@@ -110,6 +113,7 @@ class MixdownController:
         )
         thread.succeeded.connect(lambda path, d=doc: self._on_succeeded(d, path))
         thread.failed.connect(self._on_failed)
+        thread.cancelled.connect(self._on_cancelled)
         self._thread = thread
         thread.start()
 
@@ -121,6 +125,34 @@ class MixdownController:
     def _on_failed(self, message):
         self.docker._set_mixdown_busy(False)
         QMessageBox.warning(None, "Audio Timeline", f"Could not render mixdown: {message}")
+        self.start_pending_if_any()
+
+    def cancel_inflight(self):
+        """Cancels whatever render is currently running, if any, without
+        queuing a replacement -- called the instant a clip/trim/volume
+        drag *starts* (see AudioTimelineWidget.mixdownInvalidated), well
+        before mouseReleaseEvent pushes the undo command that would
+        normally trigger render_and_apply()'s own cancel-and-queue path.
+        A render in flight at that point is already known stale (the drag
+        is about to change the audio one way or another), so there's no
+        reason to let it keep competing with the UI thread for CPU until
+        the drag happens to finish. No pending doc is queued here since
+        the drag isn't done yet; _on_cancelled clears the busy spinner if
+        nothing else queues one up by the time this one actually stops."""
+        if self._thread is not None and self._thread.isRunning():
+            self._thread.cancel()
+
+    def _on_cancelled(self):
+        # Expected/routine -- a newer edit superseded this render before it
+        # finished (see render_and_apply's should_cancel handoff), not an
+        # error, so no warning dialog and no result to apply. There should
+        # always be a _pending_doc queued right behind a cancellation (it's
+        # what triggered the cancel() call in the first place); the
+        # fallback below just guards against the spinner getting stuck on
+        # if that assumption is ever wrong.
+        if self._pending_doc is None:
+            self.docker._set_mixdown_busy(False)
+            return
         self.start_pending_if_any()
 
     def start_pending_if_any(self):
