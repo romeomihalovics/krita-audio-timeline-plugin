@@ -57,6 +57,15 @@ class AudioTimelineWidget(ThemeMixin, PaintingMixin, VolumeEditingMixin, Interac
     # InteractionMixin.mousePressEvent and AudioTimelineDocker's
     # connection to MixdownController.cancel_inflight().
     mixdownInvalidated = pyqtSignal()
+    # Emitted at the end of every clip/trim/volume drag (mouseReleaseEvent),
+    # whether or not it actually changed anything -- a real edit already
+    # triggers its own re-render via contentChanged, but a drag that
+    # started with mixdownInvalidated (cancelling an in-flight render) and
+    # then turns out to be a no-op (released back at its starting position)
+    # pushes no undo command and so never fires contentChanged -- nothing
+    # else would ever re-render the edit that got cancelled out from under
+    # it otherwise. See MixdownController.cancel_inflight()/drag_settled().
+    mixdownDragSettled = pyqtSignal()
     # Emitted whenever this widget's size/content geometry may have changed
     # (zoom, track add/remove, clip drag/resize) -- the ruler lives in its
     # own widget (see AudioTimelineRulerWidget) outside this one's vertical

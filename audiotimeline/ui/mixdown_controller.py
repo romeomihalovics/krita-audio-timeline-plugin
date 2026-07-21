@@ -20,6 +20,13 @@ class MixdownController:
         # rather than starting an overlapping render.
         self._thread = None
         self._pending_doc = None
+        # Set by cancel_inflight() when it actually cancels a running
+        # render -- means "a render got cancelled mid-drag and nothing has
+        # guaranteed a replacement yet." Discharged by drag_settled() once
+        # the drag that triggered the cancellation ends. See both for why
+        # this is a plain flag rather than eagerly queuing a replacement
+        # doc immediately at cancel time.
+        self._render_owed = False
         # None = not checked yet; True/False once the first real Document
         # tells us whether this Krita build has the setAudioTracks()/
         # audioTracks() API at all (added in Krita 5.3/6.0 -- absent on
@@ -118,42 +125,94 @@ class MixdownController:
         thread.start()
 
     def _on_succeeded(self, doc, path):
+        # Forget this thread before doing anything else that might lead
+        # to render_and_apply() checking self._thread.isRunning() (via
+        # start_pending_if_any() below) -- succeeded/failed/cancelled can
+        # all fire while the worker's run() hasn't actually returned yet
+        # (isRunning() still true), so relying on that check here would
+        # make render_and_apply() think a render is still in flight and
+        # just re-queue _pending_doc again instead of ever starting the
+        # replacement render.
+        self._thread = None
         self.docker._set_mixdown_busy(False)
         self.apply_to_krita(doc, path)
         self.start_pending_if_any()
 
     def _on_failed(self, message):
+        self._thread = None
         self.docker._set_mixdown_busy(False)
         QMessageBox.warning(None, "Audio Timeline", f"Could not render mixdown: {message}")
         self.start_pending_if_any()
 
     def cancel_inflight(self):
-        """Cancels whatever render is currently running, if any, without
-        queuing a replacement -- called the instant a clip/trim/volume
-        drag *starts* (see AudioTimelineWidget.mixdownInvalidated), well
-        before mouseReleaseEvent pushes the undo command that would
-        normally trigger render_and_apply()'s own cancel-and-queue path.
-        A render in flight at that point is already known stale (the drag
-        is about to change the audio one way or another), so there's no
-        reason to let it keep competing with the UI thread for CPU until
-        the drag happens to finish. No pending doc is queued here since
-        the drag isn't done yet; _on_cancelled clears the busy spinner if
-        nothing else queues one up by the time this one actually stops."""
+        """Cancels whatever render is currently running, if any -- called
+        the instant a clip/trim/volume drag *starts* (see
+        AudioTimelineWidget.mixdownInvalidated), well before
+        mouseReleaseEvent pushes the undo command that would normally
+        trigger render_and_apply()'s own cancel-and-queue path. A render
+        in flight at that point is already known stale (whatever's
+        currently committed to the timeline -- from the *previous* edit --
+        is what it should reflect, and that previous edit is exactly what
+        this cancelled render was already rendering), so there's no reason
+        to let it keep competing with the UI thread for CPU.
+
+        Deliberately does NOT queue a replacement render immediately --
+        the common case is the drag turns out to be a real edit, whose own
+        mouseReleaseEvent -> contentChanged already triggers exactly the
+        right re-render (reflecting the drag's *final* state) via
+        render_and_apply()'s own cancel-and-queue path; eagerly restarting
+        here too would mean every drag pays for an extra, almost always
+        wasted render of the pre-drag state. Instead this just remembers
+        that a render got cancelled (self._render_owed) -- drag_settled()
+        discharges that once the drag ends, but only starts a replacement
+        if nothing else already has (see there)."""
         if self._thread is not None and self._thread.isRunning():
+            self._render_owed = True
             self._thread.cancel()
 
     def _on_cancelled(self):
-        # Expected/routine -- a newer edit superseded this render before it
-        # finished (see render_and_apply's should_cancel handoff), not an
-        # error, so no warning dialog and no result to apply. There should
-        # always be a _pending_doc queued right behind a cancellation (it's
-        # what triggered the cancel() call in the first place); the
-        # fallback below just guards against the spinner getting stuck on
-        # if that assumption is ever wrong.
+        # Expected/routine -- either a newer edit's render_and_apply call
+        # (see its own cancel-and-queue path) or cancel_inflight() at a
+        # drag's start superseded this render before it finished, not an
+        # error, so no warning dialog and no result to apply. _pending_doc
+        # is only set here if a newer edit's own render_and_apply already
+        # queued one (cancel_inflight() itself deliberately doesn't -- see
+        # its docstring and drag_settled()); if so, start it now instead
+        # of waiting for whatever would otherwise flush it.
+        #
+        # Forget this thread before start_pending_if_any() below -- see
+        # _on_succeeded's comment; without this, render_and_apply() would
+        # see self._thread.isRunning() still true (run() hasn't actually
+        # returned yet at the point this fires) and just re-queue
+        # _pending_doc again instead of starting the replacement render.
+        self._thread = None
         if self._pending_doc is None:
             self.docker._set_mixdown_busy(False)
             return
         self.start_pending_if_any()
+
+    def drag_settled(self):
+        """Discharges cancel_inflight()'s "we owe a re-render" debt, if
+        any -- called at the end of every clip/trim/volume drag (see
+        AudioTimelineWidget.mixdownDragSettled), whether or not the drag
+        actually changed anything.
+
+        If the drag turned out to be a real edit, mouseReleaseEvent's own
+        undo-command push already fired contentChanged -> render_and_apply
+        by the time this runs (undo/redo and signal delivery here are
+        synchronous), which either already started the correct render or
+        queued/cancelled its way to one -- so this becomes a harmless
+        redundant call in that case (render_and_apply() cancels-and-
+        requeues the same doc, same eventual result, just one extra
+        cancel+restart cycle at most). If the drag was a no-op, nothing
+        else would ever re-render the edit that cancel_inflight() cancelled
+        out from under it -- this is what makes sure that still happens."""
+        if not self._render_owed:
+            return
+        self._render_owed = False
+        doc = self.docker.playback.active_document()
+        if doc is not None:
+            self.render_and_apply(doc)
 
     def start_pending_if_any(self):
         doc = self._pending_doc

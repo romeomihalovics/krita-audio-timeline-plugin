@@ -53,6 +53,12 @@ class AudioTimelineDocker(DockWidget):
         # AudioTimelineWidget.mixdownInvalidated / MixdownController.
         # cancel_inflight().
         self.timeline.mixdownInvalidated.connect(self.mixdown.cancel_inflight)
+        # Discharges the "we owe a re-render" debt cancel_inflight() may
+        # have left behind if the drag that triggered it turns out to be
+        # a no-op (see MixdownController.drag_settled()) -- a real edit's
+        # own contentChanged (connected above) already handles the normal
+        # case on its own.
+        self.timeline.mixdownDragSettled.connect(self.mixdown.drag_settled)
         self.state_store = DocStateStore(self)
         self.playback = PlaybackSync(self)
 
