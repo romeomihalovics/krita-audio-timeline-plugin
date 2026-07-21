@@ -6,7 +6,7 @@ off `self` (defined on the core widget or the other mixins) the same way
 they were reached as sibling methods before this file was split out."""
 
 from PyQt5.QtCore import Qt, QRect, QPoint
-from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFontMetrics
+from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFontMetrics, QPixmap
 from PyQt5.QtWidgets import QStyle
 
 from ..audio import volume_envelope
@@ -73,8 +73,7 @@ class PaintingMixin:
         painter.drawRoundedRect(clip_rect, 4, 4)
 
         if clip.peaks:
-            self._paint_waveform(painter, clip_rect, self._trimmed_peaks(clip), theme,
-                                  visible_left, visible_right, clip)
+            self._paint_waveform_cached(painter, clip_rect, clip, theme)
         elif clip.peaks is None:
             self._paint_pending_waveform(painter, clip_rect, theme, visible_left, visible_right)
 
@@ -185,6 +184,10 @@ class PaintingMixin:
         *is* the indication, continuously, and the curve stays only as the
         drag handle / precise position reference on top of it."""
         points = clip.volume_points or [(0.0, VOLUME_GAIN_UNITY), (1.0, VOLUME_GAIN_UNITY)]
+        # Sorted once for the whole curve sweep below instead of per-step
+        # inside evaluate() -- same reasoning as _paint_waveform's
+        # sorted_points.
+        sorted_points = sorted(points, key=lambda p: p[0])
 
         painter.save()
         painter.setClipRect(clip_rect)
@@ -201,7 +204,7 @@ class PaintingMixin:
         while True:
             played_frac = (x - left) / float(width) if width else 0.0
             extent_frac = clip.played_fraction_to_extent_fraction(max(0.0, min(1.0, played_frac)))
-            gain = volume_envelope.evaluate(points, extent_frac)
+            gain = volume_envelope.evaluate_sorted(sorted_points, extent_frac)
             cur = QPoint(x, int(round(self._volume_gain_to_y(clip_rect, gain))))
             if prev is not None:
                 painter.drawLine(prev, cur)
@@ -371,6 +374,45 @@ class PaintingMixin:
         end_idx = max(start_idx, min(n, int(frac_end * n)))
         return peaks[start_idx:end_idx]
 
+    def _paint_waveform_cached(self, painter, clip_rect, clip, theme):
+        """Renders _paint_waveform() into an offscreen QPixmap sized to
+        clip_rect and reuses it across repaints, instead of re-walking
+        peak buckets and re-evaluating the gain envelope per pixel column
+        on every single paintEvent (drag, scroll, playhead move, another
+        clip's own drag). The pixmap is keyed on everything that actually
+        changes what it looks like (trim window, zoom, gain envelope,
+        theme colors) but deliberately NOT on clip_rect's on-screen
+        position -- moving a clip horizontally (the common case while
+        dragging) only changes where this same pixmap is blitted, so it's
+        cheap even mid-drag. A trim or volume-envelope edit does change
+        the key and forces one re-render, same cost as before caching.
+
+        Keyed per clip.id (not by clip identity) so a clone (split/copy)
+        starts with its own cache entry rather than colliding with its
+        sibling's."""
+        peaks = self._trimmed_peaks(clip)
+        if not peaks:
+            return
+        width = max(1, clip_rect.width())
+        height = max(1, clip_rect.height())
+        key = (
+            id(clip.peaks), clip.trim_in_sec, clip.trim_out_sec,
+            width, height, tuple(clip.volume_points),
+            theme['waveform'].name(), theme['waveform_clipped'].name(),
+        )
+        cached = self._waveform_pixmap_cache.get(clip.id)
+        if cached is None or cached[0] != key:
+            pixmap = QPixmap(width, height)
+            pixmap.fill(Qt.transparent)
+            pm_painter = QPainter(pixmap)
+            pm_painter.setRenderHint(QPainter.Antialiasing)
+            local_rect = QRect(0, 0, width, height)
+            self._paint_waveform(pm_painter, local_rect, peaks, theme, 0, width, clip)
+            pm_painter.end()
+            cached = (key, pixmap)
+            self._waveform_pixmap_cache[clip.id] = cached
+        painter.drawPixmap(clip_rect.topLeft(), cached[1])
+
     def _paint_pending_waveform(self, painter, clip_rect, theme, visible_left, visible_right):
         """Drawn instead of _paint_waveform for a clip whose peaks haven't
         finished decoding yet (clip.peaks is None -- see AudioClip's
@@ -405,6 +447,11 @@ class PaintingMixin:
         if n == 0:
             return
         points = clip.volume_points if clip is not None and clip.volume_points else [(0.0, VOLUME_GAIN_UNITY), (1.0, VOLUME_GAIN_UNITY)]
+        # Sorted once here rather than inside evaluate() -- gain_at_index
+        # below is called once per drawn bucket, and re-sorting the same
+        # small list on every one of those calls added up across a long
+        # clip's worth of buckets.
+        sorted_points = sorted(points, key=lambda p: p[0])
         step_px = clip_rect.width() / float(n)
         mid_y = clip_rect.center().y()
         half_h = clip_rect.height() / 2 - 4
@@ -412,7 +459,7 @@ class PaintingMixin:
         def gain_at_index(i):
             played_frac = i / float(n - 1) if n > 1 else 0.0
             extent_frac = clip.played_fraction_to_extent_fraction(played_frac) if clip is not None else played_frac
-            return volume_envelope.evaluate(points, extent_frac)
+            return volume_envelope.evaluate_sorted(sorted_points, extent_frac)
 
         # Only walk buckets that fall within the visible horizontal range,
         # not the clip's whole stored peak array -- a long, mostly

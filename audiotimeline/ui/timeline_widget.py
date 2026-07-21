@@ -46,6 +46,17 @@ class AudioTimelineWidget(ThemeMixin, PaintingMixin, VolumeEditingMixin, Interac
 
     scrubbed = pyqtSignal(int)
     contentChanged = pyqtSignal(bool)
+    # Emitted the instant a clip/trim/volume drag *starts* -- before any
+    # actual mutation, and well before contentChanged fires on release.
+    # Dragging doesn't push an undo command (and so doesn't fire
+    # contentChanged) until mouseReleaseEvent, but a mixdown render
+    # already in flight when the drag starts is *known* stale from this
+    # point on (whatever the drag ends up doing, it changes the audio) --
+    # so the docker can cancel it right away instead of leaving it to
+    # finish uselessly while the user is still mid-drag. See
+    # InteractionMixin.mousePressEvent and AudioTimelineDocker's
+    # connection to MixdownController.cancel_inflight().
+    mixdownInvalidated = pyqtSignal()
     # Emitted whenever this widget's size/content geometry may have changed
     # (zoom, track add/remove, clip drag/resize) -- the ruler lives in its
     # own widget (see AudioTimelineRulerWidget) outside this one's vertical
@@ -108,6 +119,12 @@ class AudioTimelineWidget(ThemeMixin, PaintingMixin, VolumeEditingMixin, Interac
         self._waveform_thread = None
         self._waveform_inflight_path = None
 
+        # Cache of rendered waveform QPixmaps, keyed by clip.id -- see
+        # PaintingMixin._paint_waveform_cached(). Lives here (not on the
+        # clip) since it's purely a paint-time optimization, not part of
+        # the clip's actual state.
+        self._waveform_pixmap_cache = {}
+
         self._drag_mode = None  # None | 'scrub' | 'clip' | 'trim_left' | 'trim_right' | 'volume'
         self._drag_clip = None
         self._drag_track = None       # track the clip currently lives on mid-drag
@@ -131,6 +148,10 @@ class AudioTimelineWidget(ThemeMixin, PaintingMixin, VolumeEditingMixin, Interac
         # flat-line case where the two endpoints move together instead of a
         # specific point.
         self._drag_point_index = None
+
+        # sizeHint() last actually applied via resize()/layoutChanged -- see
+        # _apply_size_hint(). None so the first call always applies.
+        self._last_applied_size_hint = None
 
         self.setMouseTracking(True)
         self.setMinimumHeight(TRACK_HEIGHT)
@@ -173,7 +194,19 @@ class AudioTimelineWidget(ThemeMixin, PaintingMixin, VolumeEditingMixin, Interac
         # widget from sizeHint() on its own -- updateGeometry() alone leaves
         # the widget's actual size unchanged, so new tracks/wider zoom just
         # get clipped outside it. Resize explicitly whenever content grows.
-        self.resize(self.sizeHint())
+        #
+        # sizeHint() itself is an O(all clips across all tracks) scan (see
+        # _content_end_frame()), and resize()/layoutChanged fan out to the
+        # ruler/header/scrollbar-gutter widgets' own resize+repaint (see
+        # docker_ui.py's layoutChanged connections) -- skipped entirely when
+        # the hint hasn't actually changed, which is true for most in-track
+        # moves/trims (only a clip crossing the current content edge, a
+        # zoom change, or a track count change actually grows/shrinks it).
+        hint = self.sizeHint()
+        if hint == self._last_applied_size_hint:
+            return
+        self._last_applied_size_hint = hint
+        self.resize(hint)
         self.layoutChanged.emit()
 
     def _relayout(self):

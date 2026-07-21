@@ -39,7 +39,22 @@ class AudioInfo:
         self.peaks = peaks
 
 
-def _peaks_from_pcm(samples, sample_width, channels, num_buckets):
+class WaveformCancelled(Exception):
+    """Raised internally by _peaks_from_pcm() when `should_cancel()`
+    reports true at a checkpoint -- caught by WaveformWorker.run() and
+    turned into its `cancelled` signal. Never meant to escape to a caller
+    that isn't cooperating in cancellation."""
+
+
+# How many buckets to decode between should_cancel() checks -- checking
+# every single bucket would add a Python-level call per iteration of an
+# already-hot loop; checking too rarely would make cancellation slow to
+# take effect on a very long file. A few hundred buckets is cheap either
+# way relative to the unpack/min/max work already done per bucket.
+_CANCEL_CHECK_INTERVAL = 256
+
+
+def _peaks_from_pcm(samples, sample_width, channels, num_buckets, should_cancel=None):
     """
     samples: raw interleaved PCM bytes. Returns list of (min, max)
     normalized to [-1, 1], one pair per bucket.
@@ -49,6 +64,12 @@ def _peaks_from_pcm(samples, sample_width, channels, num_buckets):
     samples in that time slice together. For a peak-outline waveform
     display (not actual audio processing) this looks the same as a
     proper downmix, and it avoids any dependency on `audioop`.
+
+    `should_cancel`, if given, is a zero-arg callable checked periodically
+    (see _CANCEL_CHECK_INTERVAL) -- if it returns true, raises
+    WaveformCancelled so a decode superseded before it finishes (e.g. the
+    clip that requested it was deleted/undone) can bail out early instead
+    of finishing a result nobody needs anymore.
     """
     fmt = {1: 'b', 2: 'h', 4: 'i'}[sample_width]
     max_val = float(2 ** (8 * sample_width - 1))
@@ -59,7 +80,11 @@ def _peaks_from_pcm(samples, sample_width, channels, num_buckets):
 
     bucket_frames = max(1, frame_count // num_buckets)
     peaks = []
+    bucket_idx = 0
     for i in range(0, frame_count, bucket_frames):
+        if should_cancel is not None and bucket_idx % _CANCEL_CHECK_INTERVAL == 0 and should_cancel():
+            raise WaveformCancelled()
+        bucket_idx += 1
         start = i * bytes_per_frame
         end = min(len(samples), (i + bucket_frames) * bytes_per_frame)
         chunk = samples[start:end]
@@ -135,7 +160,7 @@ def _buckets_for_duration(duration_sec, fps):
     return int(min(MAX_BUCKETS, max(MIN_BUCKETS, round(frames * BUCKETS_PER_FRAME))))
 
 
-def analyze_wav(path, fps, num_buckets=None):
+def analyze_wav(path, fps, num_buckets=None, should_cancel=None):
     with wave.open(path, 'rb') as wf:
         channels = wf.getnchannels()
         sample_width = wf.getsampwidth()
@@ -146,11 +171,11 @@ def analyze_wav(path, fps, num_buckets=None):
     duration_sec = n_frames / float(sample_rate) if sample_rate else 0.0
     if num_buckets is None:
         num_buckets = _buckets_for_duration(duration_sec, fps)
-    peaks = _normalize_peaks(_peaks_from_pcm(raw, sample_width, channels, num_buckets))
+    peaks = _normalize_peaks(_peaks_from_pcm(raw, sample_width, channels, num_buckets, should_cancel))
     return AudioInfo(duration_sec, sample_rate, peaks)
 
 
-def analyze_with_pydub(path, fps, num_buckets=None):
+def analyze_with_pydub(path, fps, num_buckets=None, should_cancel=None):
     seg = AudioSegment.from_file(path)
     sample_width = seg.sample_width
     channels = seg.channels
@@ -159,7 +184,7 @@ def analyze_with_pydub(path, fps, num_buckets=None):
     duration_sec = len(seg) / 1000.0
     if num_buckets is None:
         num_buckets = _buckets_for_duration(duration_sec, fps)
-    peaks = _normalize_peaks(_peaks_from_pcm(raw, sample_width, channels, num_buckets))
+    peaks = _normalize_peaks(_peaks_from_pcm(raw, sample_width, channels, num_buckets, should_cancel))
     return AudioInfo(duration_sec, sample_rate, peaks)
 
 
@@ -207,7 +232,7 @@ def probe_duration(path):
     )
 
 
-def analyze_audio_file(path, fps, num_buckets=None):
+def analyze_audio_file(path, fps, num_buckets=None, should_cancel=None):
     """
     Returns an AudioInfo, or raises RuntimeError with a friendly message
     if the format needs pydub/ffmpeg and neither is available.
@@ -216,13 +241,16 @@ def analyze_audio_file(path, fps, num_buckets=None):
     to the clip's duration (see `_buckets_for_duration`) so waveform
     density on screen stays consistent regardless of clip length. Pass
     `num_buckets` explicitly to override that.
+
+    `should_cancel`, if given, is forwarded to _peaks_from_pcm() -- see
+    its docstring and WaveformCancelled.
     """
     lower = path.lower()
     if lower.endswith('.wav'):
-        return analyze_wav(path, fps, num_buckets)
+        return analyze_wav(path, fps, num_buckets, should_cancel)
 
     if HAVE_PYDUB:
-        return analyze_with_pydub(path, fps, num_buckets)
+        return analyze_with_pydub(path, fps, num_buckets, should_cancel)
 
     raise RuntimeError(
         "This file isn't a .wav and pydub is not installed, so its "

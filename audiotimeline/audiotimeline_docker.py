@@ -45,6 +45,14 @@ class AudioTimelineDocker(DockWidget):
         self.timeline.contentChanged.connect(self._on_content_changed)
 
         self.mixdown = MixdownController(self)
+        # A drag that will eventually need a re-mixdown invalidates
+        # whatever render is already in flight the instant it *starts* --
+        # not just once mouseReleaseEvent's contentChanged fires -- so a
+        # stale render doesn't keep running (and competing with the UI
+        # thread) for the entire duration of the drag. See
+        # AudioTimelineWidget.mixdownInvalidated / MixdownController.
+        # cancel_inflight().
+        self.timeline.mixdownInvalidated.connect(self.mixdown.cancel_inflight)
         self.state_store = DocStateStore(self)
         self.playback = PlaybackSync(self)
 

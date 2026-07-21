@@ -21,7 +21,18 @@ def evaluate(points, fraction):
     """
     if not points:
         return 1.0
-    pts = sorted(points, key=lambda p: p[0])
+    return evaluate_sorted(sorted(points, key=lambda p: p[0]), fraction)
+
+
+def evaluate_sorted(pts, fraction):
+    """Same as evaluate(), but `pts` must already be sorted by fraction.
+    Painting/mixdown hot paths evaluate many different fractions against
+    the same points list in a tight loop -- sharing one sort across the
+    whole loop instead of re-sorting (evaluate()'s O(n log n) per call)
+    on every single evaluation matters once that loop runs per pixel
+    column or per audio block."""
+    if not pts:
+        return 1.0
     if len(pts) == 1:
         return pts[0][1]
 

@@ -71,18 +71,53 @@ def snapshot_tracks(tracks):
     ]
 
 
-def _decode_pcm(raw, sample_width, channels):
-    """Raw interleaved PCM bytes -> list of per-channel float lists in [-1, 1]."""
+# How many samples to convert per channel between should_cancel() checks
+# in the various per-sample loops below (_decode_pcm, _resample,
+# _apply_gain_envelope, and render_mixdown's own mix-buffer accumulation).
+# Cancellation is cooperative -- once should_cancel() starts returning
+# true, the *next* chunk of this size still runs to completion (in plain
+# Python, holding the GIL the whole time) before the thread actually
+# notices and stops. That trailing chunk is exactly what's running the
+# instant a drag starts (mixdownInvalidated fires the cancel request right
+# at mousePressEvent), so it directly competes with the UI thread's own
+# drag-start work for the GIL -- too large a chunk here reads as a stutter
+# tied to the cancellation itself. Kept small (worth well under a frame's
+# budget to process, even in the pure-Python fallback) rather than the
+# larger value a throughput-only tuning would pick, since avoiding that
+# hitch matters more here than shaving a few extra should_cancel() calls
+# off a decode that, uncancelled, still has to process every sample once
+# regardless of chunk size.
+_CANCEL_CHECK_SAMPLES = 8192
+
+
+def _decode_pcm(raw, sample_width, channels, should_cancel=None):
+    """Raw interleaved PCM bytes -> list of per-channel float lists in
+    [-1, 1]. See _CANCEL_CHECK_SAMPLES for why `should_cancel` is checked
+    mid-conversion here rather than only between clips."""
     fmt = {1: 'b', 2: 'h', 4: 'i'}[sample_width]
     max_val = float(2 ** (8 * sample_width - 1))
     count = len(raw) // sample_width
     values = struct.unpack('<' + fmt * count, raw[:count * sample_width])
     channels = max(1, channels)
-    chans = [[v / max_val for v in values[ch::channels]] for ch in range(channels)]
+
+    if should_cancel is None:
+        return [[v / max_val for v in values[ch::channels]] for ch in range(channels)]
+
+    chans = []
+    for ch in range(channels):
+        ch_values = values[ch::channels]
+        n = len(ch_values)
+        out = []
+        for start in range(0, n, _CANCEL_CHECK_SAMPLES):
+            if should_cancel():
+                raise MixdownCancelled()
+            end = min(n, start + _CANCEL_CHECK_SAMPLES)
+            out.extend(v / max_val for v in ch_values[start:end])
+        chans.append(out)
     return chans
 
 
-def _decode_file(path):
+def _decode_file(path, should_cancel=None):
     """Returns (channels_list_of_float_lists, sample_rate)."""
     if path.lower().endswith('.wav'):
         with wave.open(path, 'rb') as wf:
@@ -90,11 +125,11 @@ def _decode_file(path):
             sample_width = wf.getsampwidth()
             sample_rate = wf.getframerate()
             raw = wf.readframes(wf.getnframes())
-        return _decode_pcm(raw, sample_width, channels), sample_rate
+        return _decode_pcm(raw, sample_width, channels, should_cancel), sample_rate
 
     if HAVE_PYDUB:
         seg = AudioSegment.from_file(path)
-        return _decode_pcm(seg.raw_data, seg.sample_width, seg.channels), seg.frame_rate
+        return _decode_pcm(seg.raw_data, seg.sample_width, seg.channels, should_cancel), seg.frame_rate
 
     raise RuntimeError(
         f"'{path}' isn't a .wav and pydub is not installed, so it can't "
@@ -109,7 +144,7 @@ def _to_stereo(chans):
     return chans[:2]
 
 
-def _resample(samples, src_rate, dst_rate):
+def _resample(samples, src_rate, dst_rate, should_cancel=None):
     if src_rate == dst_rate or not samples:
         return samples
     dst_len = max(1, int(round(len(samples) * dst_rate / float(src_rate))))
@@ -125,6 +160,8 @@ def _resample(samples, src_rate, dst_rate):
     n = len(samples)
     out = [0.0] * dst_len
     for i in range(dst_len):
+        if should_cancel is not None and i % _CANCEL_CHECK_SAMPLES == 0 and should_cancel():
+            raise MixdownCancelled()
         pos = i * ratio
         i0 = int(pos)
         i1 = min(i0 + 1, n - 1)
@@ -149,7 +186,7 @@ _pcm_cache = OrderedDict()
 _pcm_cache_lock = threading.Lock()
 
 
-def _decode_and_resample_cached(path, target_rate):
+def _decode_and_resample_cached(path, target_rate, should_cancel=None):
     st = os.stat(path)
     key = (path, st.st_mtime_ns, st.st_size, target_rate)
     with _pcm_cache_lock:
@@ -158,9 +195,14 @@ def _decode_and_resample_cached(path, target_rate):
             _pcm_cache.move_to_end(key)
             return cached
 
-    chans, rate = _decode_file(path)
+    # Not cached -- decode from scratch. Raises MixdownCancelled straight
+    # through from _decode_file/_resample (see _CANCEL_CHECK_SAMPLES)
+    # without populating the cache, so a cancelled-mid-decode render
+    # leaves nothing stale behind for the next (correct) render to
+    # mistakenly reuse.
+    chans, rate = _decode_file(path, should_cancel)
     chans = _to_stereo(chans)
-    chans = [_resample(ch, rate, target_rate) for ch in chans]
+    chans = [_resample(ch, rate, target_rate, should_cancel) for ch in chans]
 
     with _pcm_cache_lock:
         _pcm_cache[key] = chans
@@ -170,8 +212,8 @@ def _decode_and_resample_cached(path, target_rate):
     return chans
 
 
-def _prepare_clip(path, target_rate, trim_in_sec, trim_out_sec, source_duration_sec):
-    chans = _decode_and_resample_cached(path, target_rate)
+def _prepare_clip(path, target_rate, trim_in_sec, trim_out_sec, source_duration_sec, should_cancel=None):
+    chans = _decode_and_resample_cached(path, target_rate, should_cancel)
 
     # Trim to the played region only, at the (now-resampled) mix sample
     # rate -- trim_in_sec/trim_out_sec are relative to the *source* file,
@@ -183,7 +225,7 @@ def _prepare_clip(path, target_rate, trim_in_sec, trim_out_sec, source_duration_
 
 
 def _apply_gain_envelope(chans, volume_points, trim_in_sec, trim_out_sec,
-                          source_duration_sec, trim_in_floor_sec):
+                          source_duration_sec, trim_in_floor_sec, should_cancel=None):
     """Scales each channel's samples by the gain envelope defined by
     `volume_points` -- a list of (fraction, gain) points, `fraction` in
     [0, 1] over the clip's permanent volume-envelope extent
@@ -208,7 +250,19 @@ def _apply_gain_envelope(chans, volume_points, trim_in_sec, trim_out_sec,
             return chans
         if HAVE_NUMPY:
             return [ch * gain for ch in chans]
-        return [array('d', (v * gain for v in ch)) for ch in chans]
+        if should_cancel is None:
+            return [array('d', (v * gain for v in ch)) for ch in chans]
+        out = []
+        for ch in chans:
+            n_ch = len(ch)
+            scaled = array('d')
+            for start in range(0, n_ch, _CANCEL_CHECK_SAMPLES):
+                if should_cancel():
+                    raise MixdownCancelled()
+                end = min(n_ch, start + _CANCEL_CHECK_SAMPLES)
+                scaled.extend(v * gain for v in ch[start:end])
+            out.append(scaled)
+        return out
 
     n = max((len(ch) for ch in chans), default=0)
     if n == 0:
@@ -228,7 +282,7 @@ def _apply_gain_envelope(chans, volume_points, trim_in_sec, trim_out_sec,
     if boundary_indices[-1] != n - 1:
         boundary_indices.append(n - 1)
     boundary_gains = [
-        volume_envelope.evaluate(points, extent_fraction_at(i / float(n - 1) if n > 1 else 0.0))
+        volume_envelope.evaluate_sorted(points, extent_fraction_at(i / float(n - 1) if n > 1 else 0.0))
         for i in boundary_indices
     ]
 
@@ -249,6 +303,8 @@ def _apply_gain_envelope(chans, volume_points, trim_in_sec, trim_out_sec,
         k = 0
         last_k = len(boundary_indices) - 2
         for i in range(n):
+            if should_cancel is not None and i % _CANCEL_CHECK_SAMPLES == 0 and should_cancel():
+                raise MixdownCancelled()
             while k < last_k and i > boundary_indices[k + 1]:
                 k += 1
             i0, i1 = boundary_indices[k], boundary_indices[k + 1]
@@ -260,7 +316,16 @@ def _apply_gain_envelope(chans, volume_points, trim_in_sec, trim_out_sec,
 
     out = []
     for ch in chans:
-        scaled = array('d', (v * gains[i] for i, v in enumerate(ch)))
+        if should_cancel is None:
+            out.append(array('d', (v * gains[i] for i, v in enumerate(ch))))
+            continue
+        n_ch = len(ch)
+        scaled = array('d')
+        for start in range(0, n_ch, _CANCEL_CHECK_SAMPLES):
+            if should_cancel():
+                raise MixdownCancelled()
+            end = min(n_ch, start + _CANCEL_CHECK_SAMPLES)
+            scaled.extend(ch[i] * gains[i] for i in range(start, end))
         out.append(scaled)
     return out
 
@@ -273,13 +338,31 @@ def _clamp16(x):
     return int(x)
 
 
-def render_mixdown(tracks, fps, total_frames, out_path, sample_rate=TARGET_SAMPLE_RATE):
+class MixdownCancelled(Exception):
+    """Raised internally by render_mixdown() when `should_cancel()` reports
+    true at a checkpoint between clips -- caught by MixdownWorker.run() and
+    turned into its `cancelled` signal. Never meant to escape to a caller
+    that isn't cooperating in cancellation."""
+
+
+def render_mixdown(tracks, fps, total_frames, out_path, sample_rate=TARGET_SAMPLE_RATE,
+                    should_cancel=None):
     """
     Mixes every unmuted clip on every track down to a single interleaved
     stereo 16-bit WAV at `out_path`, sized to cover `total_frames` at
     `fps`. Raises on decode failure of any individual clip is swallowed
     (that clip is just silently skipped) so one bad file doesn't sink
     the whole mixdown.
+
+    `should_cancel`, if given, is a zero-arg callable checked between
+    clips, once more before the final mix-down/write, and periodically
+    *within* a single clip's own decode/resample/gain-envelope steps (see
+    _CANCEL_CHECK_SAMPLES) -- if it returns true, raises MixdownCancelled
+    so a render superseded by a newer edit can bail out early instead of
+    finishing (and writing) a result that's about to be discarded anyway.
+    The per-clip checkpoints matter for a timeline with just one (long)
+    clip, where there's no "between clips" boundary to land on until
+    that one clip is already fully processed.
     """
     total_samples = max(1, int(round((total_frames / float(fps)) * sample_rate)))
 
@@ -295,17 +378,23 @@ def render_mixdown(tracks, fps, total_frames, out_path, sample_rate=TARGET_SAMPL
         if track.muted:
             continue
         for clip in track.clips:
+            if should_cancel is not None and should_cancel():
+                raise MixdownCancelled()
             try:
                 chans = _prepare_clip(
                     clip.file_path, sample_rate,
                     clip.trim_in_sec, clip.trim_out_sec, clip.source_duration_sec,
+                    should_cancel,
                 )
+            except MixdownCancelled:
+                raise
             except Exception:
                 continue
             chans = _apply_gain_envelope(
                 chans, clip.volume_points,
                 clip.trim_in_sec, clip.trim_out_sec,
                 clip.source_duration_sec, clip.trim_in_floor_sec,
+                should_cancel,
             )
 
             start_sample = int(round((clip.start_frame / float(fps)) * sample_rate))
@@ -324,7 +413,12 @@ def render_mixdown(tracks, fps, total_frames, out_path, sample_rate=TARGET_SAMPL
                 else:
                     dst = buffer[ch_idx]
                     for i in range(length):
+                        if should_cancel is not None and i % _CANCEL_CHECK_SAMPLES == 0 and should_cancel():
+                            raise MixdownCancelled()
                         dst[start_sample + i] += samples[i]
+
+    if should_cancel is not None and should_cancel():
+        raise MixdownCancelled()
 
     if HAVE_NUMPY:
         peak = float(np.max(np.abs(buffer))) if buffer.size else 0.0
