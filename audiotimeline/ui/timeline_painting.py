@@ -73,7 +73,7 @@ class PaintingMixin:
         painter.drawRoundedRect(clip_rect, 4, 4)
 
         if clip.peaks:
-            self._paint_waveform_cached(painter, clip_rect, clip, theme)
+            self._paint_waveform_cached(painter, clip_rect, clip, theme, visible_left, visible_right)
         elif clip.peaks is None:
             self._paint_pending_waveform(painter, clip_rect, theme, visible_left, visible_right)
 
@@ -374,44 +374,77 @@ class PaintingMixin:
         end_idx = max(start_idx, min(n, int(frac_end * n)))
         return peaks[start_idx:end_idx]
 
-    def _paint_waveform_cached(self, painter, clip_rect, clip, theme):
-        """Renders _paint_waveform() into an offscreen QPixmap sized to
-        clip_rect and reuses it across repaints, instead of re-walking
-        peak buckets and re-evaluating the gain envelope per pixel column
-        on every single paintEvent (drag, scroll, playhead move, another
-        clip's own drag). The pixmap is keyed on everything that actually
-        changes what it looks like (trim window, zoom, gain envelope,
-        theme colors) but deliberately NOT on clip_rect's on-screen
-        position -- moving a clip horizontally (the common case while
-        dragging) only changes where this same pixmap is blitted, so it's
-        cheap even mid-drag. A trim or volume-envelope edit does change
-        the key and forces one re-render, same cost as before caching.
+    # Qt's raster paint engine loses precision (and can silently stop
+    # drawing altogether) on coordinates much past roughly +/-32,767px --
+    # a long clip zoomed in far enough can easily exceed that on its own
+    # (e.g. a 3-minute clip at even a modest zoom is well past it), so a
+    # single QPixmap spanning the clip's whole on-screen width isn't safe
+    # at any zoom level. Kept comfortably under that limit.
+    _MAX_WAVEFORM_TILE_PX = 8000
+
+    def _paint_waveform_cached(self, painter, clip_rect, clip, theme, visible_left, visible_right):
+        """Renders _paint_waveform() into offscreen QPixmap *tiles*
+        (see _MAX_WAVEFORM_TILE_PX) and reuses them across repaints,
+        instead of re-walking peak buckets and re-evaluating the gain
+        envelope per pixel column on every single paintEvent (drag,
+        scroll, playhead move, another clip's own drag).
+
+        Tiles are keyed in clip-local coordinates (a tile index into the
+        clip's own full on-screen width), not by clip_rect's actual
+        on-screen position -- moving a clip horizontally (the common case
+        while dragging) only changes where already-cached tiles get
+        blitted, so it stays cheap mid-drag. Only tiles overlapping the
+        currently-visible slice are ever rendered, so a long clip mostly
+        scrolled off-screen doesn't pay to render (or even allocate) the
+        rest of it. A trim, zoom, or volume-envelope edit changes the key
+        and forces the affected tile(s) to re-render, same cost as before
+        tiling.
 
         Keyed per clip.id (not by clip identity) so a clone (split/copy)
-        starts with its own cache entry rather than colliding with its
+        starts with its own cache entries rather than colliding with its
         sibling's."""
         peaks = self._trimmed_peaks(clip)
         if not peaks:
             return
-        width = max(1, clip_rect.width())
+        full_width = max(1, clip_rect.width())
         height = max(1, clip_rect.height())
-        key = (
+
+        draw_left = max(clip_rect.left(), visible_left) - clip_rect.left()
+        draw_right = min(clip_rect.right(), visible_right) - clip_rect.left()
+        if draw_right < draw_left:
+            return
+
+        tile_w = min(full_width, self._MAX_WAVEFORM_TILE_PX)
+        first_tile = max(0, draw_left // tile_w)
+        last_tile = min((full_width - 1) // tile_w, draw_right // tile_w)
+
+        tiles = self._waveform_pixmap_cache.setdefault(clip.id, {})
+        base_key = (
             id(clip.peaks), clip.trim_in_sec, clip.trim_out_sec,
-            width, height, tuple(clip.volume_points),
+            full_width, height, tuple(clip.volume_points),
             theme['waveform'].name(), theme['waveform_clipped'].name(),
         )
-        cached = self._waveform_pixmap_cache.get(clip.id)
-        if cached is None or cached[0] != key:
-            pixmap = QPixmap(width, height)
-            pixmap.fill(Qt.transparent)
-            pm_painter = QPainter(pixmap)
-            pm_painter.setRenderHint(QPainter.Antialiasing)
-            local_rect = QRect(0, 0, width, height)
-            self._paint_waveform(pm_painter, local_rect, peaks, theme, 0, width, clip)
-            pm_painter.end()
-            cached = (key, pixmap)
-            self._waveform_pixmap_cache[clip.id] = cached
-        painter.drawPixmap(clip_rect.topLeft(), cached[1])
+        for tile_idx in range(first_tile, last_tile + 1):
+            tile_start = tile_idx * tile_w
+            tile_width = min(tile_w, full_width - tile_start)
+            key = base_key + (tile_idx,)
+            cached = tiles.get(tile_idx)
+            if cached is None or cached[0] != key:
+                pixmap = QPixmap(tile_width, height)
+                pixmap.fill(Qt.transparent)
+                pm_painter = QPainter(pixmap)
+                pm_painter.setRenderHint(QPainter.Antialiasing)
+                # Shifted left by tile_start (not 0) so bucket->x math
+                # inside _paint_waveform -- computed against the clip's
+                # full (unshifted) width, to keep step_px/zoom correct --
+                # lands each bucket at its position *within this tile*
+                # rather than its absolute position in the whole clip.
+                local_rect = QRect(-tile_start, 0, full_width, height)
+                self._paint_waveform(pm_painter, local_rect, peaks, theme, 0, tile_width, clip)
+                pm_painter.end()
+                cached = (key, pixmap)
+                tiles[tile_idx] = cached
+            painter.drawPixmap(clip_rect.left() + tile_start, clip_rect.top(), cached[1])
 
     def _paint_pending_waveform(self, painter, clip_rect, theme, visible_left, visible_right):
         """Drawn instead of _paint_waveform for a clip whose peaks haven't

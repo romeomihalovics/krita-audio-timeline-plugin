@@ -394,6 +394,7 @@ class InteractionMixin:
             self._relayout()
 
     def mouseReleaseEvent(self, event):
+        is_mixdown_drag = self._drag_mode in ('clip', 'trim_left', 'trim_right', 'volume')
         if self._drag_mode == 'clip' and self._drag_clip is not None:
             moved = (self._drag_clip.start_frame != self._drag_start_frame
                      or self._drag_track is not self._drag_origin_track)
@@ -426,6 +427,8 @@ class InteractionMixin:
         self._drag_origin_track = None
         self._drag_orig_volume_points = None
         self._drag_point_index = None
+        if is_mixdown_drag:
+            self.mixdownDragSettled.emit()
 
     def mouseDoubleClickEvent(self, event):
         pos = event.pos()

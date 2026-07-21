@@ -158,6 +158,15 @@ class DocStateStore:
         for track_dict in data.get("tracks", []):
             track = AudioTrack(name=track_dict.get("name", "Track"))
             track.muted = bool(track_dict.get("muted", False))
+            # Registered in timeline.tracks *before* its clips are added
+            # (and before request_waveform() is called for them) below --
+            # request_waveform()'s own pruning (see ClipboardMixin.
+            # _file_still_needed) checks self.tracks to decide whether a
+            # queued decode is still needed, and would otherwise see this
+            # track (and every clip about to be added to it) as not
+            # existing yet, silently dropping the decode request for
+            # every clip restored from a saved document.
+            timeline.add_track(track)
             for clip_dict in track_dict.get("clips", []):
                 path = clip_dict.get("file_path")
                 if not path or not os.path.exists(path):
@@ -194,7 +203,6 @@ class DocStateStore:
                     clip.volume_points = [tuple(p) for p in volume_points]
                 track.add_clip(clip)
                 timeline.request_waveform(path)
-            timeline.add_track(track)
 
         if not timeline.tracks:
             docker.add_track()
