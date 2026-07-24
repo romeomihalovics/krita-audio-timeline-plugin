@@ -282,6 +282,12 @@ def build_title_bar(docker):
 
     title_layout.addStretch(1)
 
+    # "document-export" is Krita's own export glyph (used for File > Export).
+    docker._export_btn = make_tool_button(
+        "document-export", QStyle.SP_DialogSaveButton, "Export Mixdown…", docker.export_mixdown,
+    )
+    title_layout.addWidget(docker._export_btn)
+
     docker._info_btn = make_tool_button(
         "system-help", QStyle.SP_MessageBoxInformation, "Feature List", docker._open_info_dialog,
     )

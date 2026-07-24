@@ -55,6 +55,22 @@ class PlaybackSync:
         if total_frames != self._last_total_frames:
             self._last_total_frames = total_frames
             docker.timeline.set_total_frames(total_frames)
+            # The mixdown WAV is deliberately rendered out to only the end
+            # frame's length (see render_mixdown's total_samples), not the
+            # full clip content, to avoid mixing down audio that isn't part
+            # of the animation at its current length -- Krita itself would
+            # happily keep playing/scrubbing past the end frame if the
+            # mixdown had more audio in it. So shortening/lengthening the
+            # animation range changes what the correct mixdown even is, the
+            # same as an actual clip edit. Nothing else observes this
+            # change (it's not a timeline.contentChanged edit), so
+            # re-render here explicitly rather than leaving the mixdown
+            # stale until some unrelated clip edit happens to trigger one.
+            # render_and_apply already cancels/coalesces overlapping
+            # renders, so dragging the end frame handle (which fires this
+            # every ~40ms poll tick while held) doesn't queue up redundant
+            # work.
+            docker.mixdown.render_and_apply(doc)
 
         fps = doc.framesPerSecond()
         if fps != self._last_fps:

@@ -43,6 +43,8 @@ FEATURES = [
     ("Exit volume editing", "Apply/Cancel icons · Escape", "Keeps or discards the changes made this session."),
     ("Undo / Redo", "Ctrl+Z / Ctrl+Y (or the docker's own buttons)", "Its own history, independent of "
                      "Krita's canvas undo."),
+    ("Export Mixdown", "Export icon in the title bar", "Saves the current mixed-down WAV to a "
+                     "location of your choice."),
     ("Auto update", "Cog icon → Settings", "Checks this plugin's GitHub releases for a newer version, "
                      "on startup or on demand."),
 ]

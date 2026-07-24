@@ -71,6 +71,7 @@ docker's title bar, just left of the settings cog.
 | **Set an exact gain** | **Double-click** a percentage readout to type in a precise value (up to 200%). |
 | **Exit volume editing** | Click the **Apply/Cancel** icons, or press **Escape** to discard changes made this session. |
 | **Undo / Redo** | **Ctrl+Z / Ctrl+Y**, or the docker's own buttons — its own history, independent of Krita's canvas undo (see [Undo/redo](#undo-redo-is-not-kritas-own)). |
+| **Export Mixdown** | The **export icon** in the title bar saves the current mixed-down WAV to a location of your choice. |
 | **Auto update** | The **cog icon** opens Settings, with a "Check for Updates" button and a toggle for automatic startup checks — see [Update checking](#update-checking). |
 | **Adapts to your Krita theme** | No setup needed. |
 
@@ -178,6 +179,14 @@ edit and hearing it reflected during playback.
   path — if a clip's source file is moved, renamed, or deleted, it's
   silently dropped on reload (same path-based-reference caveat Krita's
   own linked layers have).
+- **No audio past the animation's end frame.** This is a deliberate
+  performance optimization, not a Krita restriction — Krita *will* keep
+  playing/scrubbing audio past the end frame if there's any, but the
+  mixdown WAV handed to it is rendered exactly as long as the end frame,
+  with any clip content past that point cut off rather than rendered
+  (and its samples computed) only to be thrown away. Changing the end
+  frame re-renders the mixdown to match, so extending it is enough to
+  hear a clip that runs past the old one.
 
 ## Supported audio formats
 
@@ -217,6 +226,33 @@ in order:
    directory and restart Krita. Stale `.pyc` files from a previous copy
    of the plugin are a classic cause of "I fixed the bug but it's still
    broken."
+
+## Running the tests
+
+Tests live in `audiotimeline/tests/` and run against a real (offscreen)
+PyQt5 — no actual Krita install needed; a small fake `krita` module is
+installed automatically (see the root `conftest.py`) so the plugin package
+imports outside Krita. Everything runs against generated audio (tiny sine
+wavs) or a fake Krita `Document` — no third-party fixture files, and
+anything that would otherwise hit a real URL (the update checker) is
+mocked.
+
+```bash
+# Debian/Ubuntu system packages (no pip/venv required):
+sudo apt-get install python3-pytest python3-pytestqt python3-numpy
+
+pytest
+```
+
+`audiotimeline/tests/` is only ever imported by other files under
+`audiotimeline/tests/` — runtime plugin code must never import test
+helpers/fixtures. This is enforced by `tools/check_no_test_imports.py`
+(also run as part of the normal `pytest` suite via
+`test_no_runtime_test_imports.py`); run it standalone with:
+
+```bash
+python3 tools/check_no_test_imports.py
+```
 
 ## Releasing
 
