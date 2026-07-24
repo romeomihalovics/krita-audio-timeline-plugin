@@ -177,6 +177,13 @@ class AudioTimelineDocker(DockWidget):
         self.timeline.undo_stack.push(commands.AddClipCommand(self.timeline, track, clip))
         self.timeline.request_waveform(path)
 
+    def export_mixdown(self):
+        doc = self.playback.active_document()
+        if doc is None:
+            QMessageBox.information(None, "Audio Timeline", "No active document.")
+            return
+        self.mixdown.export_mixdown(doc)
+
     # --------------------------------------------------------------- mixdown
     def _on_content_changed(self, affects_audio):
         self.state_store.save_state()

@@ -4,9 +4,10 @@ overlapping edits into a single re-render rather than racing them. Owned by
 AudioTimelineDocker as `docker.mixdown`."""
 
 import os
+import shutil
 import tempfile
 
-from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
 from ..audio import mixdown
 from ..audio.mixdown_worker import MixdownWorker
@@ -243,6 +244,33 @@ class MixdownController:
             doc.setAudioTracks([])
         except Exception as exc:
             QMessageBox.warning(None, "Audio Timeline", f"Could not clear Krita's audio track: {exc}")
+
+    def export_mixdown(self, doc):
+        """Copies this document's already-rendered mixdown WAV (see
+        mixdown_path_for) out to a location the user picks -- the file in
+        tempdir is transient (cleaned up on docker close), so this is the
+        only way to keep a copy of it around."""
+        path = self.mixdown_path_for(doc)
+        if not os.path.exists(path):
+            QMessageBox.information(
+                None, "Audio Timeline",
+                "There's no mixdown to export yet -- add an audio clip first."
+            )
+            return
+
+        doc_name = os.path.splitext(os.path.basename(doc.fileName()))[0] if doc.fileName() else "mixdown"
+        dest, _ = QFileDialog.getSaveFileName(
+            None, "Export Mixdown", f"{doc_name}_mixdown.wav", "WAV Audio (*.wav)"
+        )
+        if not dest:
+            return
+        if not dest.lower().endswith(".wav"):
+            dest += ".wav"
+
+        try:
+            shutil.copyfile(path, dest)
+        except OSError as exc:
+            QMessageBox.warning(None, "Audio Timeline", f"Could not export mixdown: {exc}")
 
     def wait_for_shutdown(self, timeout_ms=2000):
         if self._thread is not None and self._thread.isRunning():
