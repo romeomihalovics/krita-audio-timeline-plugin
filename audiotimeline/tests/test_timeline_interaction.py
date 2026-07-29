@@ -8,30 +8,31 @@ so these run identically under the offscreen QPA platform.
 
 from unittest.mock import patch
 
-from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt5.QtCore import QPoint, QPointF
 from PyQt5.QtGui import QKeyEvent, QMouseEvent
 
+from .. import qtcompat
 from ..audio.audio_track import AudioTrack
 from ..ui.timeline_constants import TRACK_HEIGHT
 
 
-def _press(widget, pos, modifiers=Qt.NoModifier, button=Qt.LeftButton):
-    event = QMouseEvent(QEvent.MouseButtonPress, QPointF(pos), button, button, modifiers)
+def _press(widget, pos, modifiers=qtcompat.NO_MODIFIER, button=qtcompat.LEFT_BUTTON):
+    event = QMouseEvent(qtcompat.EVENT_MOUSE_BUTTON_PRESS, QPointF(pos), button, button, modifiers)
     widget.mousePressEvent(event)
 
 
-def _move(widget, pos, modifiers=Qt.NoModifier):
-    event = QMouseEvent(QEvent.MouseMove, QPointF(pos), Qt.NoButton, Qt.LeftButton, modifiers)
+def _move(widget, pos, modifiers=qtcompat.NO_MODIFIER):
+    event = QMouseEvent(qtcompat.EVENT_MOUSE_MOVE, QPointF(pos), qtcompat.NO_BUTTON, qtcompat.LEFT_BUTTON, modifiers)
     widget.mouseMoveEvent(event)
 
 
-def _release(widget, pos, button=Qt.LeftButton):
-    event = QMouseEvent(QEvent.MouseButtonRelease, QPointF(pos), button, Qt.NoButton, Qt.NoModifier)
+def _release(widget, pos, button=qtcompat.LEFT_BUTTON):
+    event = QMouseEvent(qtcompat.EVENT_MOUSE_BUTTON_RELEASE, QPointF(pos), button, qtcompat.NO_BUTTON, qtcompat.NO_MODIFIER)
     widget.mouseReleaseEvent(event)
 
 
-def _key(widget, key, modifiers=Qt.NoModifier):
-    event = QKeyEvent(QEvent.KeyPress, key, modifiers)
+def _key(widget, key, modifiers=qtcompat.NO_MODIFIER):
+    event = QKeyEvent(qtcompat.EVENT_KEY_PRESS, key, modifiers)
     widget.keyPressEvent(event)
 
 
@@ -206,7 +207,7 @@ def test_s_key_splits_selected_clip(timeline, make_clip):
     timeline.selected_clip = clip
     timeline.current_frame = 24
 
-    _key(timeline, Qt.Key_S)
+    _key(timeline, qtcompat.KEY_S)
     assert len(track.clips) == 2
 
 
@@ -218,7 +219,7 @@ def test_delete_key_removes_selected_clip(timeline, make_clip):
     track.add_clip(clip)
     timeline.selected_clip = clip
 
-    _key(timeline, Qt.Key_Delete)
+    _key(timeline, qtcompat.KEY_DELETE)
     assert clip not in track.clips
 
     timeline.undo_stack.undo()
@@ -239,7 +240,7 @@ def test_right_click_delete_clip_via_context_menu(timeline, make_clip):
 
     pos = _clip_center_pos(timeline, 0, clip)
     event = type("Evt", (), {"pos": lambda self: pos, "globalPos": lambda self: pos})()
-    with patch("PyQt5.QtWidgets.QMenu.exec_", new=fake_exec):
+    with patch("PyQt5.QtWidgets.QMenu.exec", new=fake_exec):
         timeline.contextMenuEvent(event)
 
     assert clip not in track.clips
@@ -253,11 +254,11 @@ def test_ctrl_z_and_ctrl_y_shortcuts_undo_redo(timeline, make_clip):
     track.add_clip(clip)
     timeline.selected_clip = clip
 
-    _key(timeline, Qt.Key_Delete)
+    _key(timeline, qtcompat.KEY_DELETE)
     assert clip not in track.clips
 
-    _key(timeline, Qt.Key_Z, Qt.ControlModifier)
+    _key(timeline, qtcompat.KEY_Z, qtcompat.CONTROL_MODIFIER)
     assert clip in track.clips
 
-    _key(timeline, Qt.Key_Y, Qt.ControlModifier)
+    _key(timeline, qtcompat.KEY_Y, qtcompat.CONTROL_MODIFIER)
     assert clip not in track.clips

@@ -6,9 +6,11 @@ while the (potentially slow) full peak analysis finishes off the UI thread.
 
 import threading
 
-from PyQt5.QtCore import QThread, pyqtSignal
-
+from .. import qtcompat
 from .waveform_utils import analyze_audio_file, WaveformCancelled
+
+QThread = qtcompat.QtCore.QThread
+pyqtSignal = qtcompat.QtCore.pyqtSignal
 
 
 class WaveformWorker(QThread):

@@ -3,12 +3,14 @@ trim, volume drag), clip selection, split/delete, and the context menu.
 Mixed into AudioTimelineWidget alongside PaintingMixin/VolumeEditingMixin/
 ClipboardMixin (see ui/timeline_widget.py)."""
 
-from PyQt5.QtCore import Qt, QEvent
-from PyQt5.QtWidgets import QMenu, QApplication
-
 from .. import commands
+from .. import qtcompat
 from ..audio import volume_envelope
 from .timeline_constants import HANDLE_PX, VOLUME_GAIN_MAX
+
+QEvent = qtcompat.QtCore.QEvent
+QMenu = qtcompat.QtWidgets.QMenu
+QApplication = qtcompat.QtWidgets.QApplication
 
 
 class InteractionMixin:
@@ -100,15 +102,15 @@ class InteractionMixin:
     # --------------------------------------------------------------- input
     def mousePressEvent(self, event):
         self.setFocus()
-        if event.button() == Qt.RightButton:
+        if event.button() == qtcompat.RIGHT_BUTTON:
             # Right-click never starts a drag -- contextMenuEvent (fired
             # separately, on release) is the sole handler for right-click
             # actions (deleting a clip, or removing a bend point while
             # volume-editing), so nothing here should pre-empt it by
             # selecting/dragging whatever's under the cursor first.
             return
-        pos = event.pos()
-        if event.modifiers() & Qt.ShiftModifier:
+        pos = qtcompat.event_pos(event)
+        if event.modifiers() & qtcompat.SHIFT_MODIFIER:
             self._drag_mode = 'scrub'
             self.set_current_frame(self.x_to_frame(pos.x()), emit=True)
             return
@@ -240,7 +242,7 @@ class InteractionMixin:
         self.update()
 
     def mouseMoveEvent(self, event):
-        pos = event.pos()
+        pos = qtcompat.event_pos(event)
         if self._drag_mode is None:
             # Not currently dragging anything -- just update the hover
             # cursor: a horizontal resize cursor hints the selected clip's
@@ -249,11 +251,11 @@ class InteractionMixin:
             # of the same resize-cursor idea).
             handle = self._trim_handle_at(pos)
             if handle:
-                self.setCursor(Qt.SizeHorCursor)
+                self.setCursor(qtcompat.SIZE_HOR_CURSOR)
             elif self._volume_line_hover(pos):
-                self.setCursor(Qt.SizeVerCursor)
+                self.setCursor(qtcompat.SIZE_VER_CURSOR)
             else:
-                self.setCursor(Qt.ArrowCursor)
+                self.setCursor(qtcompat.ARROW_CURSOR)
         if self._drag_mode == 'scrub':
             self.set_current_frame(self.x_to_frame(pos.x()), emit=True)
         elif self._drag_mode == 'trim_left' and self._drag_clip is not None:
@@ -431,7 +433,7 @@ class InteractionMixin:
             self.mixdownDragSettled.emit()
 
     def mouseDoubleClickEvent(self, event):
-        pos = event.pos()
+        pos = qtcompat.event_pos(event)
         clip = self.volume_editing_clip
         if clip is not None:
             for track_idx, track in enumerate(self.tracks):
@@ -488,13 +490,13 @@ class InteractionMixin:
         # calling keyPressEvent -- so without claiming these here via
         # ShortcutOverride, Krita's actions eat the key and this widget
         # never sees it.
-        if event.type() == QEvent.ShortcutOverride:
-            if event.key() in (Qt.Key_Delete, Qt.Key_Backspace) and (
+        if event.type() == qtcompat.enum_value(QEvent, "ShortcutOverride"):
+            if event.key() in (qtcompat.KEY_DELETE, qtcompat.KEY_BACKSPACE) and (
                 self.selected_clip is not None or self.volume_editing_clip is not None
             ):
                 event.accept()
                 return True
-            if event.key() == Qt.Key_S and self.selected_clip is not None:
+            if event.key() == qtcompat.KEY_S and self.selected_clip is not None:
                 event.accept()
                 return True
             if self._is_undo_shortcut(event) or self._is_redo_shortcut(event):
@@ -514,39 +516,39 @@ class InteractionMixin:
     @staticmethod
     def _is_undo_shortcut(event):
         mods = event.modifiers()
-        return bool(mods & Qt.ControlModifier) and not (mods & Qt.ShiftModifier) and event.key() == Qt.Key_Z
+        return bool(mods & qtcompat.CONTROL_MODIFIER) and not (mods & qtcompat.SHIFT_MODIFIER) and event.key() == qtcompat.KEY_Z
 
     @staticmethod
     def _is_redo_shortcut(event):
         mods = event.modifiers()
-        if not (mods & Qt.ControlModifier):
+        if not (mods & qtcompat.CONTROL_MODIFIER):
             return False
         # Accept both common Redo conventions -- plain Ctrl+Y, and
         # Ctrl+Shift+Z -- since Krita/the desktop environment may already
         # bind one of these to its own Redo action as an alternate
         # shortcut, in which case only the other one reliably reaches us.
-        if event.key() == Qt.Key_Y:
+        if event.key() == qtcompat.KEY_Y:
             return True
-        return bool(mods & Qt.ShiftModifier) and event.key() == Qt.Key_Z
+        return bool(mods & qtcompat.SHIFT_MODIFIER) and event.key() == qtcompat.KEY_Z
 
     @staticmethod
     def _is_copy_shortcut(event):
         mods = event.modifiers()
-        return bool(mods & Qt.ControlModifier) and not (mods & Qt.ShiftModifier) and event.key() == Qt.Key_C
+        return bool(mods & qtcompat.CONTROL_MODIFIER) and not (mods & qtcompat.SHIFT_MODIFIER) and event.key() == qtcompat.KEY_C
 
     @staticmethod
     def _is_paste_shortcut(event):
         mods = event.modifiers()
-        return bool(mods & Qt.ControlModifier) and not (mods & Qt.ShiftModifier) and event.key() == Qt.Key_V
+        return bool(mods & qtcompat.CONTROL_MODIFIER) and not (mods & qtcompat.SHIFT_MODIFIER) and event.key() == qtcompat.KEY_V
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape and self.volume_editing_clip is not None:
+        if event.key() == qtcompat.KEY_ESCAPE and self.volume_editing_clip is not None:
             # Escape cancels the edit (reverts to the state volume-editing
             # mode was entered with), same as clicking the X icon.
             self._exit_volume_editing(revert=True)
             self.update()
             return
-        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+        if event.key() in (qtcompat.KEY_DELETE, qtcompat.KEY_BACKSPACE):
             if self.volume_editing_clip is not None:
                 # Deleting the clip currently being volume-edited is
                 # disabled (see _delete_clip) -- Delete instead removes
@@ -559,7 +561,7 @@ class InteractionMixin:
             if self.selected_clip is not None:
                 self._delete_clip(self.selected_clip)
                 return
-        if event.key() == Qt.Key_S and not event.modifiers():
+        if event.key() == qtcompat.KEY_S and not event.modifiers():
             if self.selected_clip is not None:
                 self.split_selected_clip()
                 return
@@ -578,7 +580,7 @@ class InteractionMixin:
         super().keyPressEvent(event)
 
     def contextMenuEvent(self, event):
-        pos = event.pos()
+        pos = qtcompat.event_pos(event)
         idx = self.track_index_at_y(pos.y())
         if idx < 0:
             return
@@ -590,7 +592,7 @@ class InteractionMixin:
                 return
             menu = QMenu(self)
             paste_action = menu.addAction("Paste")
-            chosen = menu.exec_(event.globalPos())
+            chosen = menu.exec(qtcompat.event_global_pos(event))
             if chosen == paste_action:
                 self._paste_at(idx, frame)
             return
@@ -613,14 +615,14 @@ class InteractionMixin:
                     self.update()
                     point_menu = QMenu(self)
                     remove_action = point_menu.addAction("Remove Point")
-                    chosen = point_menu.exec_(event.globalPos())
+                    chosen = point_menu.exec(qtcompat.event_global_pos(event))
                     if chosen == remove_action:
                         self._remove_volume_point(clip, point_idx)
             return
         menu = QMenu(self)
         delete_action = menu.addAction("Delete Clip")
         copy_action = menu.addAction("Copy Clip")
-        chosen = menu.exec_(event.globalPos())
+        chosen = menu.exec(qtcompat.event_global_pos(event))
         if chosen == delete_action:
             self._delete_clip(clip)
         elif chosen == copy_action:
@@ -662,7 +664,7 @@ class InteractionMixin:
 
     def wheelEvent(self, event):
         # Ctrl+wheel to zoom the timeline horizontally
-        if event.modifiers() & Qt.ControlModifier:
+        if event.modifiers() & qtcompat.CONTROL_MODIFIER:
             delta = event.angleDelta().y()
             factor = 1.15 if delta > 0 else (1 / 1.15)
             self.px_per_frame = max(0.5, min(40.0, self.px_per_frame * factor))

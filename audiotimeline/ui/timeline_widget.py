@@ -1,10 +1,14 @@
-from PyQt5.QtCore import Qt, QRect, QSize, pyqtSignal
-from PyQt5.QtWidgets import QWidget, QUndoStack
-
+from .. import qtcompat
 from .timeline_constants import (
     EXTERNAL_AUDIO_EXTENSIONS, TRACK_HEIGHT, RULER_HEIGHT, TRACK_HEADER_WIDTH,
     BUTTON_SIZE, BUTTON_GAP,
 )
+
+QRect = qtcompat.QtCore.QRect
+QSize = qtcompat.QtCore.QSize
+pyqtSignal = qtcompat.QtCore.pyqtSignal
+QWidget = qtcompat.QtWidgets.QWidget
+QUndoStack = qtcompat.QtWidgets.QUndoStack
 from .timeline_theme import ThemeMixin
 from .timeline_painting import PaintingMixin
 from .timeline_volume_editing import VolumeEditingMixin
@@ -166,7 +170,7 @@ class AudioTimelineWidget(ThemeMixin, PaintingMixin, VolumeEditingMixin, Interac
         self.setMinimumHeight(TRACK_HEIGHT)
         # Needed to actually receive keyPressEvent (Delete key on a
         # selected clip) -- widgets default to no keyboard focus.
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(qtcompat.STRONG_FOCUS)
         # Lets files dragged in from the OS file manager land on the
         # timeline -- see dragEnterEvent/dropEvent.
         self.setAcceptDrops(True)

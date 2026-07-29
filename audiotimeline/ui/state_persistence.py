@@ -8,9 +8,10 @@ import json
 import os
 import uuid
 
-from PyQt5.QtWidgets import QUndoStack
-
+from .. import qtcompat
 from ..audio.audio_track import AudioTrack, AudioClip
+
+QUndoStack = qtcompat.QtWidgets.QUndoStack
 
 ANNOTATION_KEY = "audiotimeline/state"
 ANNOTATION_DESC = "Audio Timeline plugin state (tracks/clips)"

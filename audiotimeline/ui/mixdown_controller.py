@@ -7,10 +7,12 @@ import os
 import shutil
 import tempfile
 
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
-
+from .. import qtcompat
 from ..audio import mixdown
 from ..audio.mixdown_worker import MixdownWorker
+
+QFileDialog = qtcompat.QtWidgets.QFileDialog
+QMessageBox = qtcompat.QtWidgets.QMessageBox
 
 
 class MixdownController:

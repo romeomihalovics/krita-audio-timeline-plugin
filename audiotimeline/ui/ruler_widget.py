@@ -1,12 +1,15 @@
 import math
 
-from PyQt5.QtCore import QSize
-from PyQt5.QtGui import QPainter, QColor, QPen
-from PyQt5.QtWidgets import QWidget
-
+from .. import qtcompat
 from .timeline_constants import RULER_HEIGHT, RULER_MIN_TICK_SPACING_PX, RULER_MIN_LABEL_SPACING_PX, NICE_SECOND_STEPS
 from .timeline_icons import fps_divisors
 from .timeline_theme import paint_out_of_range_overlay
+
+QSize = qtcompat.QtCore.QSize
+QPainter = qtcompat.QtGui.QPainter
+QColor = qtcompat.QtGui.QColor
+QPen = qtcompat.QtGui.QPen
+QWidget = qtcompat.QtWidgets.QWidget
 
 
 class AudioTimelineRulerWidget(QWidget):
@@ -70,7 +73,7 @@ class AudioTimelineRulerWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(qtcompat.enum_value(QPainter, "Antialiasing"))
         timeline = self.timeline
         theme = timeline._theme_colors()
 
@@ -105,11 +108,11 @@ class AudioTimelineRulerWidget(QWidget):
 
     def mousePressEvent(self, event):
         self._dragging = True
-        self.timeline.set_current_frame(self.timeline.x_to_frame(event.pos().x()), emit=True)
+        self.timeline.set_current_frame(self.timeline.x_to_frame(qtcompat.event_pos(event).x()), emit=True)
 
     def mouseMoveEvent(self, event):
         if self._dragging:
-            self.timeline.set_current_frame(self.timeline.x_to_frame(event.pos().x()), emit=True)
+            self.timeline.set_current_frame(self.timeline.x_to_frame(qtcompat.event_pos(event).x()), emit=True)
 
     def mouseReleaseEvent(self, event):
         self._dragging = False

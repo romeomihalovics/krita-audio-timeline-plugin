@@ -1,8 +1,10 @@
 import threading
 
-from PyQt5.QtCore import QThread, pyqtSignal
-
+from .. import qtcompat
 from . import mixdown
+
+QThread = qtcompat.QtCore.QThread
+pyqtSignal = qtcompat.QtCore.pyqtSignal
 
 
 class MixdownWorker(QThread):

@@ -1,9 +1,13 @@
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
-    QCheckBox,
-)
-
+from . import qtcompat
 from . import updater
+
+QDialog = qtcompat.QtWidgets.QDialog
+QVBoxLayout = qtcompat.QtWidgets.QVBoxLayout
+QHBoxLayout = qtcompat.QtWidgets.QHBoxLayout
+QLabel = qtcompat.QtWidgets.QLabel
+QProgressBar = qtcompat.QtWidgets.QProgressBar
+QPushButton = qtcompat.QtWidgets.QPushButton
+QCheckBox = qtcompat.QtWidgets.QCheckBox
 
 
 class UpdateDialog(QDialog):

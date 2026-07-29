@@ -5,17 +5,26 @@ share. Pure layout/wiring -- every function here takes the owning
 AudioTimelineDocker and attaches widgets/state onto it, the same shapes
 `_build_ui`/`_build_title_bar`/etc. used before this was split out."""
 
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QToolButton, QLabel, QScrollArea,
-    QStyle, QDockWidget, QGraphicsOpacityEffect, QUndoGroup, QFrame,
-)
-
+from .. import qtcompat
 from .timeline_widget import (
     AudioTimelineCornerWidget, AudioTimelineRulerWidget, AudioTimelineHeaderWidget,
     AudioTimelineHeaderWrapperWidget, RULER_HEIGHT, TRACK_HEADER_WIDTH,
 )
 from .timeline_icons import krita_icon
+
+QSize = qtcompat.QtCore.QSize
+QWidget = qtcompat.QtWidgets.QWidget
+QVBoxLayout = qtcompat.QtWidgets.QVBoxLayout
+QHBoxLayout = qtcompat.QtWidgets.QHBoxLayout
+QGridLayout = qtcompat.QtWidgets.QGridLayout
+QToolButton = qtcompat.QtWidgets.QToolButton
+QLabel = qtcompat.QtWidgets.QLabel
+QScrollArea = qtcompat.QtWidgets.QScrollArea
+QStyle = qtcompat.QtWidgets.QStyle
+QDockWidget = qtcompat.QtWidgets.QDockWidget
+QGraphicsOpacityEffect = qtcompat.QtWidgets.QGraphicsOpacityEffect
+QUndoGroup = qtcompat.QtWidgets.QUndoGroup
+QFrame = qtcompat.QtWidgets.QFrame
 
 SPINNER_SIZE = 16
 SPINNER_INTERVAL_MS = 40      # ~25 fps
@@ -73,11 +82,11 @@ def build_undo_redo_actions(docker):
 
     docker._undo_action = docker.undo_group.createUndoAction(docker.timeline, "Undo")
     docker._undo_action.setToolTip("Undo (Ctrl+Z)")
-    docker._undo_action.setIcon(krita_icon("edit-undo", QStyle.SP_ArrowBack))
+    docker._undo_action.setIcon(krita_icon("edit-undo", qtcompat.enum_value(QStyle, "SP_ArrowBack")))
 
     docker._redo_action = docker.undo_group.createRedoAction(docker.timeline, "Redo")
     docker._redo_action.setToolTip("Redo (Ctrl+Y)")
-    docker._redo_action.setIcon(krita_icon("edit-redo", QStyle.SP_ArrowForward))
+    docker._redo_action.setIcon(krita_icon("edit-redo", qtcompat.enum_value(QStyle, "SP_ArrowForward")))
 
 
 def build_ui(docker):
@@ -93,8 +102,8 @@ def build_ui(docker):
     # there's no seam (nor a way for one edge to visually double up or
     # misalign against another) where any of them meet.
     panel = QFrame()
-    panel.setFrameShape(QFrame.StyledPanel)
-    panel.setFrameShadow(QFrame.Sunken)
+    panel.setFrameShape(qtcompat.enum_value(QFrame, "StyledPanel"))
+    panel.setFrameShadow(qtcompat.enum_value(QFrame, "Sunken"))
     panel_layout = QGridLayout(panel)
     panel_layout.setContentsMargins(0, 0, 0, 0)
     panel_layout.setSpacing(0)
@@ -119,7 +128,7 @@ def build_ui(docker):
     # "addlayer" is Krita's own plus-sign icon, same one used for "Add
     # Layer" in the Layers docker.
     add_track_btn = make_tool_button(
-        "addlayer", QStyle.SP_FileDialogNewFolder, "Add Track", docker.add_track,
+        "addlayer", qtcompat.enum_value(QStyle, "SP_FileDialogNewFolder"), "Add Track", docker.add_track,
         size=RULER_HEIGHT - 4, icon_size=14,
     )
     corner_layout.addWidget(add_track_btn)
@@ -127,7 +136,7 @@ def build_ui(docker):
 
     # "document-open" is Krita's own folder icon, used for File > Open.
     import_btn = make_tool_button(
-        "document-open", QStyle.SP_DialogOpenButton, "Import Audio…", docker.import_audio,
+        "document-open", qtcompat.enum_value(QStyle, "SP_DialogOpenButton"), "Import Audio…", docker.import_audio,
         size=RULER_HEIGHT - 4, icon_size=14,
     )
     corner_layout.addWidget(import_btn)
@@ -139,9 +148,9 @@ def build_ui(docker):
     ruler_scroll.setWidget(docker.ruler)
     ruler_scroll.setWidgetResizable(False)
     ruler_scroll.setFixedHeight(RULER_HEIGHT)
-    ruler_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    ruler_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    ruler_scroll.setFrameShape(QFrame.NoFrame)
+    ruler_scroll.setHorizontalScrollBarPolicy(qtcompat.SCROLLBAR_ALWAYS_OFF)
+    ruler_scroll.setVerticalScrollBarPolicy(qtcompat.SCROLLBAR_ALWAYS_OFF)
+    ruler_scroll.setFrameShape(qtcompat.enum_value(QFrame, "NoFrame"))
     docker.ruler_scroll_area = ruler_scroll
 
     docker.header = AudioTimelineHeaderWidget(docker.timeline)
@@ -149,15 +158,15 @@ def build_ui(docker):
     header_scroll.setWidget(docker.header)
     header_scroll.setWidgetResizable(False)
     header_scroll.setFixedWidth(TRACK_HEADER_WIDTH)
-    header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    header_scroll.setFrameShape(QFrame.NoFrame)
+    header_scroll.setHorizontalScrollBarPolicy(qtcompat.SCROLLBAR_ALWAYS_OFF)
+    header_scroll.setVerticalScrollBarPolicy(qtcompat.SCROLLBAR_ALWAYS_OFF)
+    header_scroll.setFrameShape(qtcompat.enum_value(QFrame, "NoFrame"))
     docker.header_scroll_area = header_scroll
 
     scroll = QScrollArea()
     scroll.setWidget(docker.timeline)
     scroll.setWidgetResizable(False)
-    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setFrameShape(qtcompat.enum_value(QFrame, "NoFrame"))
     panel_layout.addWidget(scroll, 1, 1)
     docker.scroll_area = scroll
 
@@ -171,7 +180,7 @@ def build_ui(docker):
     # on the scrollbar's side shrinks its *own* viewport to match --
     # the spacer is shown/hidden to track whichever scrollbar it's
     # compensating for.
-    scrollbar_extent = docker.style().pixelMetric(QStyle.PM_ScrollBarExtent)
+    scrollbar_extent = docker.style().pixelMetric(qtcompat.enum_value(QStyle, "PM_ScrollBarExtent"))
 
     ruler_wrapper = QWidget()
     ruler_wrapper_layout = QHBoxLayout(ruler_wrapper)
@@ -263,7 +272,7 @@ def build_title_bar(docker):
     docker._lock_btn.setCheckable(True)
     docker._lock_btn.setAutoRaise(True)
     docker._lock_btn.setToolTip("Lock Docker")
-    docker._lock_btn.setIcon(krita_icon("docker_lock_a", QStyle.SP_DialogYesButton))
+    docker._lock_btn.setIcon(krita_icon("docker_lock_a", qtcompat.enum_value(QStyle, "SP_DialogYesButton")))
     docker._lock_btn.toggled.connect(lambda checked: on_lock_toggled(docker, checked))
     title_layout.addWidget(docker._lock_btn)
 
@@ -276,7 +285,7 @@ def build_title_bar(docker):
     docker._mixdown_spinner.setToolTip("Buffering (mixing down audio)…")
     docker._mixdown_spinner.setVisible(False)
     docker._mixdown_spinner_pixmap = krita_icon(
-        "selectionMask", QStyle.SP_BrowserReload
+        "selectionMask", qtcompat.enum_value(QStyle, "SP_BrowserReload")
     ).pixmap(SPINNER_SIZE, SPINNER_SIZE)
     title_layout.addWidget(docker._mixdown_spinner)
 
@@ -284,23 +293,23 @@ def build_title_bar(docker):
 
     # "document-export" is Krita's own export glyph (used for File > Export).
     docker._export_btn = make_tool_button(
-        "document-export", QStyle.SP_DialogSaveButton, "Export Mixdown…", docker.export_mixdown,
+        "document-export", qtcompat.enum_value(QStyle, "SP_DialogSaveButton"), "Export Mixdown…", docker.export_mixdown,
     )
     title_layout.addWidget(docker._export_btn)
 
     docker._info_btn = make_tool_button(
-        "system-help", QStyle.SP_MessageBoxInformation, "Feature List", docker._open_info_dialog,
+        "system-help", qtcompat.enum_value(QStyle, "SP_MessageBoxInformation"), "Feature List", docker._open_info_dialog,
     )
     title_layout.addWidget(docker._info_btn)
 
     docker._settings_btn = make_tool_button(
-        "configure", QStyle.SP_FileDialogDetailedView, "Audio Timeline Settings", docker._open_settings_dialog,
+        "configure", qtcompat.enum_value(QStyle, "SP_FileDialogDetailedView"), "Audio Timeline Settings", docker._open_settings_dialog,
     )
     title_layout.addWidget(docker._settings_btn)
 
     # "edit-cut" is Krita's own scissors glyph (used for Edit > Cut).
     docker._split_btn = make_tool_button(
-        "edit-cut", QStyle.SP_DialogResetButton, "Split Selected Clip at Playhead (S)",
+        "edit-cut", qtcompat.enum_value(QStyle, "SP_DialogResetButton"), "Split Selected Clip at Playhead (S)",
         docker.timeline.split_selected_clip,
     )
     can_split = docker.timeline.can_split_selected_clip()
@@ -328,13 +337,13 @@ def build_title_bar(docker):
     # docker title bar (it's drawn from the OS/Qt style, not koIcon) --
     # "view-fullscreen" is the closest themed stand-in.
     float_btn = make_tool_button(
-        "view-fullscreen", QStyle.SP_TitleBarNormalButton, "Float Docker",
+        "view-fullscreen", qtcompat.enum_value(QStyle, "SP_TitleBarNormalButton"), "Float Docker",
         lambda: docker.setFloating(not docker.isFloating()),
     )
     title_layout.addWidget(float_btn)
 
     close_btn = make_tool_button(
-        "window-close", QStyle.SP_TitleBarCloseButton, "Close Docker", docker.close,
+        "window-close", qtcompat.enum_value(QStyle, "SP_TitleBarCloseButton"), "Close Docker", docker.close,
     )
     title_layout.addWidget(close_btn)
 
@@ -344,11 +353,12 @@ def build_title_bar(docker):
 def on_lock_toggled(docker, checked):
     docker._lock_btn.setIcon(krita_icon(
         "docker_lock_b" if checked else "docker_lock_a",
-        QStyle.SP_DialogYesButton,
+        qtcompat.enum_value(QStyle, "SP_DialogYesButton"),
     ))
-    features = QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetFloatable
+    features = (qtcompat.enum_value(QDockWidget, "DockWidgetClosable")
+                | qtcompat.enum_value(QDockWidget, "DockWidgetFloatable"))
     if not checked:
-        features |= QDockWidget.DockWidgetMovable
+        features |= qtcompat.enum_value(QDockWidget, "DockWidgetMovable")
     docker.setFeatures(features)
 
 

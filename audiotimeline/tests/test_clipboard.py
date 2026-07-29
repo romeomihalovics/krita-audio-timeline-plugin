@@ -10,6 +10,7 @@ from PyQt5.QtCore import QMimeData, QUrl
 from PyQt5.QtGui import QDropEvent
 from PyQt5.QtWidgets import QApplication
 
+from .. import qtcompat
 from ..audio.audio_track import AudioTrack
 
 
@@ -130,10 +131,10 @@ def test_drop_event_imports_audio_at_drop_position(timeline, wav_factory, qtbot)
     mime = QMimeData()
     mime.setUrls([QUrl.fromLocalFile(path)])
 
-    from PyQt5.QtCore import QPointF, Qt
+    from PyQt5.QtCore import QPointF
     event = QDropEvent(
-        QPointF(timeline.frame_to_x(50), 10), Qt.CopyAction, mime,
-        Qt.LeftButton, Qt.NoModifier,
+        QPointF(timeline.frame_to_x(50), 10), qtcompat.COPY_ACTION, mime,
+        qtcompat.LEFT_BUTTON, qtcompat.NO_MODIFIER,
     )
     timeline.dropEvent(event)
     assert len(track.clips) == 1

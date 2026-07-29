@@ -4,12 +4,14 @@ queue those imports kick off. Mixed into AudioTimelineWidget alongside
 PaintingMixin/VolumeEditingMixin/InteractionMixin (see ui/timeline_widget.py).
 """
 
-from PyQt5.QtWidgets import QApplication, QMessageBox
-
 from .. import commands
+from .. import qtcompat
 from ..audio.audio_track import AudioClip, AudioTrack
 from ..audio.waveform_worker import WaveformWorker
 from .timeline_constants import EXTERNAL_AUDIO_EXTENSIONS
+
+QApplication = qtcompat.QtWidgets.QApplication
+QMessageBox = qtcompat.QtWidgets.QMessageBox
 
 
 class ClipboardMixin:
@@ -218,7 +220,7 @@ class ClipboardMixin:
         if not paths:
             event.ignore()
             return
-        pos = event.pos()
+        pos = qtcompat.event_pos(event)
         idx = self.track_index_at_y(pos.y())
         if idx < 0:
             idx = self.active_track_index if self.tracks else 0

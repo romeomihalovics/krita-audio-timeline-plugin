@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 from PyQt5.QtCore import QPoint
 
+from .. import qtcompat
 from ..audio.audio_track import AudioTrack
 from ..ui.timeline_constants import TRACK_HEIGHT
 from .test_timeline_interaction import _press, _move, _release, _key
-from PyQt5.QtCore import Qt
 
 
 def _enter_editing(timeline, track_idx, clip):
@@ -100,11 +100,11 @@ def test_double_click_on_curve_adds_bend_point(timeline, make_clip):
     # Somewhere in the middle of the flat line, away from either endpoint.
     mid_x = clip_rect.left() + clip_rect.width() // 2
     line_y = int(timeline._volume_line_y_for(clip, clip_rect))
-    from PyQt5.QtCore import QEvent, QPointF
+    from PyQt5.QtCore import QPointF
     from PyQt5.QtGui import QMouseEvent
 
-    event = QMouseEvent(QEvent.MouseButtonDblClick, QPointF(mid_x, line_y),
-                         Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    event = QMouseEvent(qtcompat.EVENT_MOUSE_BUTTON_DBL_CLICK, QPointF(mid_x, line_y),
+                         qtcompat.LEFT_BUTTON, qtcompat.LEFT_BUTTON, qtcompat.NO_MODIFIER)
     timeline.mouseDoubleClickEvent(event)
 
     assert len(clip.volume_points) == 3
@@ -120,7 +120,7 @@ def test_remove_bend_point_via_delete_key(timeline, make_clip):
     _enter_editing(timeline, 0, clip)
     timeline.selected_volume_point_index = 1
 
-    _key(timeline, Qt.Key_Delete)
+    _key(timeline, qtcompat.KEY_DELETE)
     assert clip.volume_points == [(0.0, 1.0), (1.0, 1.0)]
 
 
@@ -133,7 +133,7 @@ def test_cannot_remove_endpoint_via_delete_key(timeline, make_clip):
     _enter_editing(timeline, 0, clip)
     timeline.selected_volume_point_index = 0  # the left endpoint
 
-    _key(timeline, Qt.Key_Delete)
+    _key(timeline, qtcompat.KEY_DELETE)
     assert len(clip.volume_points) == 3
 
 
@@ -149,10 +149,10 @@ def test_remove_bend_point_via_double_click(timeline, make_clip):
     screen_pos = timeline._volume_point_screen_pos(clip, clip_rect, (0.5, 0.3))
     px, py = screen_pos
 
-    from PyQt5.QtCore import QEvent, QPointF
+    from PyQt5.QtCore import QPointF
     from PyQt5.QtGui import QMouseEvent
-    event = QMouseEvent(QEvent.MouseButtonDblClick, QPointF(px, py),
-                         Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    event = QMouseEvent(qtcompat.EVENT_MOUSE_BUTTON_DBL_CLICK, QPointF(px, py),
+                         qtcompat.LEFT_BUTTON, qtcompat.LEFT_BUTTON, qtcompat.NO_MODIFIER)
     timeline.mouseDoubleClickEvent(event)
     assert clip.volume_points == [(0.0, 1.0), (1.0, 1.0)]
 
@@ -176,7 +176,7 @@ def test_remove_bend_point_via_right_click_menu(timeline, make_clip):
         return None
 
     event = type("Evt", (), {"pos": lambda self: pos, "globalPos": lambda self: pos})()
-    with patch("PyQt5.QtWidgets.QMenu.exec_", new=fake_exec):
+    with patch("PyQt5.QtWidgets.QMenu.exec", new=fake_exec):
         timeline.contextMenuEvent(event)
     assert clip.volume_points == [(0.0, 1.0), (1.0, 1.0)]
 
@@ -212,7 +212,7 @@ def test_exiting_with_unsaved_changes_prompts_and_respects_choice(timeline, make
 
     # Clicking a different clip while unsaved changes exist prompts;
     # choosing Discard should revert clip_a's envelope.
-    with patch.object(QMessageBox, "question", return_value=QMessageBox.Discard):
+    with patch.object(QMessageBox, "question", return_value=qtcompat.enum_value(QMessageBox, "Discard")):
         b_pos = _line_pos(timeline, 0, clip_b) if False else QPoint(
             timeline.frame_to_x(clip_b.start_frame) + 5, TRACK_HEIGHT // 2
         )
