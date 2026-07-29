@@ -62,10 +62,10 @@ def test_check_for_updates_button_opens_update_dialog(qtbot):
     dialog = SettingsDialog()
     qtbot.addWidget(dialog)
     with patch("audiotimeline.settings_dialog.UpdateDialog") as mock_dialog_cls:
-        mock_dialog_cls.return_value.exec_ = MagicMock()
+        mock_dialog_cls.return_value.exec = MagicMock()
         dialog._open_update_dialog()
     mock_dialog_cls.assert_called_once_with(dialog, automatic=False)
-    mock_dialog_cls.return_value.exec_.assert_called_once()
+    mock_dialog_cls.return_value.exec.assert_called_once()
 
 
 def test_report_issue_opens_external_url(qtbot):

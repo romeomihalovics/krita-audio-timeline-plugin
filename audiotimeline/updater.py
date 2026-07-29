@@ -12,7 +12,10 @@ import tempfile
 import urllib.request
 import zipfile
 
-from PyQt5.QtCore import QThread, pyqtSignal
+from . import qtcompat
+
+QThread = qtcompat.QtCore.QThread
+pyqtSignal = qtcompat.QtCore.pyqtSignal
 
 GITHUB_REPO = "romeomihalovics/krita-audio-timeline-plugin"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

@@ -37,7 +37,9 @@ engine; update Krita to fix this.
 ## Tested on
 
 - **Windows 11**, Krita 5.3.2.1
-- **Ubuntu 24.04.4**, Krita 5.3.2.1 _(on here, scrubbing with clicking and dragging on the animation timeline did not keep the playhead in sync, only using the arrows / the forward & back buttons did)_
+- **Windows 11**, Krita 6.0.3
+- **Ubuntu 24.04.4**, Krita 5.3.2.1
+- **Ubuntu 24.04.4**, Krita 6.0.3
 
 ## Features
 
@@ -243,6 +245,27 @@ sudo apt-get install python3-pytest python3-pytestqt python3-numpy
 
 pytest
 ```
+
+### Testing against both PyQt5 and PyQt6
+
+The plugin supports both Krita 5.x (PyQt5) and Krita 6.x (PyQt6) via the
+compatibility shim in `audiotimeline/qtcompat.py`. A plain `pytest` above
+only ever exercises the PyQt5 branch of that shim — if PyQt6 happens to
+also be installed alongside PyQt5 in the same environment, `qtcompat`'s
+`try: import PyQt5` still succeeds first and the PyQt6 fallback code
+never actually runs, so a bug in it would go unnoticed.
+
+`tools/run_tests_both_qt.sh` runs the suite twice to catch that class of
+bug: once against the system PyQt5, and once inside an isolated
+PyQt6-only venv (created on first run, reused afterwards) where PyQt5
+genuinely isn't importable, forcing `qtcompat`'s PyQt6 branch to run for
+real:
+
+```bash
+tools/run_tests_both_qt.sh
+```
+
+Pass pytest args through as usual, e.g. `tools/run_tests_both_qt.sh -k volume_editing`.
 
 `audiotimeline/tests/` is only ever imported by other files under
 `audiotimeline/tests/` — runtime plugin code must never import test

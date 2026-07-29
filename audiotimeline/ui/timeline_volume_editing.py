@@ -4,13 +4,15 @@ its bend points, plus the editing-mode enter/exit flow and the exact-
 percentage dialog. Mixed into AudioTimelineWidget alongside PaintingMixin/
 InteractionMixin/ClipboardMixin (see ui/timeline_widget.py)."""
 
-from PyQt5.QtCore import QRect
-from PyQt5.QtGui import QFontMetrics
-from PyQt5.QtWidgets import QInputDialog, QMessageBox
-
 from .. import commands
+from .. import qtcompat
 from ..audio import volume_envelope
 from .timeline_constants import HANDLE_PX, VOLUME_ICON_SIZE, VOLUME_GAIN_UNITY, VOLUME_GAIN_MAX
+
+QRect = qtcompat.QtCore.QRect
+QFontMetrics = qtcompat.QtGui.QFontMetrics
+QInputDialog = qtcompat.QtWidgets.QInputDialog
+QMessageBox = qtcompat.QtWidgets.QMessageBox
 
 
 def gain_to_pct_text(gain):
@@ -343,9 +345,11 @@ class VolumeEditingMixin:
         if self._volume_edit_entry_points is None or list(clip.volume_points) == list(self._volume_edit_entry_points):
             self._exit_volume_editing(revert=False)
             return
+        save_button = qtcompat.enum_value(QMessageBox, "Save")
+        discard_button = qtcompat.enum_value(QMessageBox, "Discard")
         choice = QMessageBox.question(
             self, "Unsaved Volume Changes",
             f'Save the volume changes made to "{clip.name}"?',
-            QMessageBox.Save | QMessageBox.Discard, QMessageBox.Discard,
+            save_button | discard_button, discard_button,
         )
-        self._exit_volume_editing(revert=(choice != QMessageBox.Save))
+        self._exit_volume_editing(revert=(choice != save_button))

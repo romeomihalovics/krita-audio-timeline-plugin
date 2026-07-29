@@ -1,10 +1,15 @@
-from PyQt5.QtCore import Qt, QRect, QSize
-from PyQt5.QtGui import QPainter, QPen, QBrush
-from PyQt5.QtWidgets import QWidget, QInputDialog
-
 from .. import commands
+from .. import qtcompat
 from .timeline_constants import TRACK_HEADER_WIDTH, TRACK_HEIGHT
 from .timeline_icons import krita_icon
+
+QRect = qtcompat.QtCore.QRect
+QSize = qtcompat.QtCore.QSize
+QPainter = qtcompat.QtGui.QPainter
+QPen = qtcompat.QtGui.QPen
+QBrush = qtcompat.QtGui.QBrush
+QWidget = qtcompat.QtWidgets.QWidget
+QInputDialog = qtcompat.QtWidgets.QInputDialog
 
 
 class AudioTimelineHeaderWidget(QWidget):
@@ -29,7 +34,7 @@ class AudioTimelineHeaderWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(qtcompat.enum_value(QPainter, "Antialiasing"))
         timeline = self.timeline
         theme = timeline._theme_colors()
         painter.fillRect(self.rect(), theme['canvas_bg'])
@@ -41,7 +46,7 @@ class AudioTimelineHeaderWidget(QWidget):
             painter.fillRect(header_rect, theme['header_active_bg'] if is_active else theme['header_bg'])
             painter.setPen(theme['header_text'])
             painter.drawText(header_rect.adjusted(8, 0, -50, 0),
-                              Qt.AlignVCenter | Qt.AlignLeft, track.name)
+                              qtcompat.ALIGN_VCENTER | qtcompat.ALIGN_LEFT, track.name)
 
             if index < len(timeline.tracks) - 1:
                 painter.setPen(QPen(theme['border']))
@@ -66,7 +71,7 @@ class AudioTimelineHeaderWidget(QWidget):
         painter.end()
 
     def mousePressEvent(self, event):
-        pos = event.pos()
+        pos = qtcompat.event_pos(event)
         timeline = self.timeline
         idx = timeline.track_index_at_y(pos.y())
         if idx < 0:
@@ -86,7 +91,7 @@ class AudioTimelineHeaderWidget(QWidget):
         timeline.set_active_track_index(idx)
 
     def mouseDoubleClickEvent(self, event):
-        pos = event.pos()
+        pos = qtcompat.event_pos(event)
         timeline = self.timeline
         idx = timeline.track_index_at_y(pos.y())
         if idx < 0:

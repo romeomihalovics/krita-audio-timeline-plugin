@@ -3,8 +3,11 @@ from the live QPalette rather than hardcoded, so the timeline stays
 consistent with whatever theme Krita is currently using (dark, light, or a
 custom one), instead of assuming a specific dark scheme."""
 
-from PyQt5.QtCore import QRect
-from PyQt5.QtGui import QColor, QPalette
+from .. import qtcompat
+
+QRect = qtcompat.QtCore.QRect
+QColor = qtcompat.QtGui.QColor
+QPalette = qtcompat.QtGui.QPalette
 
 
 def mix(c1, c2, t):
@@ -59,10 +62,10 @@ def theme_colors(widget):
     the satellite widgets (ruler/header/corner/border) via
     `timeline._theme_colors()` -- see ThemeMixin."""
     pal = widget.palette()
-    canvas_bg = pal.color(QPalette.Window)
-    text = pal.color(QPalette.WindowText)
-    accent = pal.color(QPalette.Highlight)
-    accent_text = pal.color(QPalette.HighlightedText)
+    canvas_bg = pal.color(qtcompat.enum_value(QPalette, "Window"))
+    text = pal.color(qtcompat.enum_value(QPalette, "WindowText"))
+    accent = pal.color(qtcompat.enum_value(QPalette, "Highlight"))
+    accent_text = pal.color(qtcompat.enum_value(QPalette, "HighlightedText"))
 
     is_dark = canvas_bg.lightness() < 128
     black, white = QColor(0, 0, 0), QColor(255, 255, 255)

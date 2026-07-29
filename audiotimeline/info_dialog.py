@@ -1,8 +1,14 @@
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QWidget, QFrame,
-    QGraphicsOpacityEffect,
-)
+from . import qtcompat
+
+QDialog = qtcompat.QtWidgets.QDialog
+QVBoxLayout = qtcompat.QtWidgets.QVBoxLayout
+QHBoxLayout = qtcompat.QtWidgets.QHBoxLayout
+QLabel = qtcompat.QtWidgets.QLabel
+QPushButton = qtcompat.QtWidgets.QPushButton
+QScrollArea = qtcompat.QtWidgets.QScrollArea
+QWidget = qtcompat.QtWidgets.QWidget
+QFrame = qtcompat.QtWidgets.QFrame
+QGraphicsOpacityEffect = qtcompat.QtWidgets.QGraphicsOpacityEffect
 
 # How much less intense (opacity-wise) the description text and the
 # shortcut/action box borders are versus the full-strength title color.
@@ -68,7 +74,7 @@ class InfoDialog(QDialog):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setFrameShape(qtcompat.enum_value(QFrame, "NoFrame"))
         outer.addWidget(scroll, 1)
 
         list_widget = QWidget()
@@ -91,7 +97,7 @@ class InfoDialog(QDialog):
 
     def _feature_row(self, name, keys, description):
         row = QFrame()
-        row.setFrameShape(QFrame.NoFrame)
+        row.setFrameShape(qtcompat.enum_value(QFrame, "NoFrame"))
         row_layout = QVBoxLayout(row)
         row_layout.setContentsMargins(0, 6, 0, 6)
         row_layout.setSpacing(1)
@@ -137,8 +143,8 @@ class InfoDialog(QDialog):
         row_layout.addWidget(desc_label)
 
         divider = QFrame()
-        divider.setFrameShape(QFrame.HLine)
-        divider.setFrameShadow(QFrame.Sunken)
+        divider.setFrameShape(qtcompat.enum_value(QFrame, "HLine"))
+        divider.setFrameShadow(qtcompat.enum_value(QFrame, "Sunken"))
         row_layout.addWidget(divider)
 
         return row

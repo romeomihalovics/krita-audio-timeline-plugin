@@ -1,6 +1,7 @@
-from PyQt5.QtWidgets import QUndoCommand
-
+from . import qtcompat
 from .audio import volume_envelope
+
+QUndoCommand = qtcompat.QtWidgets.QUndoCommand
 
 
 class AddTrackCommand(QUndoCommand):

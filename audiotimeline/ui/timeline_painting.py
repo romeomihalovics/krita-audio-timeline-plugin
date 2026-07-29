@@ -5,21 +5,28 @@ ClipboardMixin (see ui/timeline_widget.py). Reads geometry/hit-test helpers
 off `self` (defined on the core widget or the other mixins) the same way
 they were reached as sibling methods before this file was split out."""
 
-from PyQt5.QtCore import Qt, QRect, QPoint
-from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFontMetrics, QPixmap
-from PyQt5.QtWidgets import QStyle
-
+from .. import qtcompat
 from ..audio import volume_envelope
 from .timeline_constants import TRACK_HEIGHT, VOLUME_ICON_SIZE, VOLUME_GAIN_UNITY, VOLUME_POINT_RADIUS
 from .timeline_icons import krita_icon, tinted_icon_pixmap
 from .timeline_theme import paint_out_of_range_overlay
 from .timeline_volume_editing import gain_to_pct_text
 
+QRect = qtcompat.QtCore.QRect
+QPoint = qtcompat.QtCore.QPoint
+QPainter = qtcompat.QtGui.QPainter
+QColor = qtcompat.QtGui.QColor
+QPen = qtcompat.QtGui.QPen
+QBrush = qtcompat.QtGui.QBrush
+QFontMetrics = qtcompat.QtGui.QFontMetrics
+QPixmap = qtcompat.QtGui.QPixmap
+QStyle = qtcompat.QtWidgets.QStyle
+
 
 class PaintingMixin:
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(qtcompat.enum_value(QPainter, "Antialiasing"))
         theme = self._theme_colors()
         painter.fillRect(self.rect(), theme['canvas_bg'])
 
@@ -52,7 +59,7 @@ class PaintingMixin:
         # pen -- without resetting to NoBrush here, a leftover brush from a
         # previous track's clip (set in _paint_clip) bleeds into this
         # outline-only rect and paints the whole next lane solid.
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(qtcompat.NO_BRUSH)
         painter.drawRect(lane_rect.adjusted(0, 0, -1, -1))
 
         for clip in track.clips:
@@ -100,8 +107,8 @@ class PaintingMixin:
             # keyPressEvent/mousePressEvent, but the icons make both
             # actions discoverable).
             apply_rect, cancel_rect = self._sticky_volume_action_rects(clip_rect, sticky_left)
-            apply_icon = krita_icon("dialog-ok-apply", QStyle.SP_DialogApplyButton)
-            cancel_icon = krita_icon("dialog-cancel", QStyle.SP_DialogCancelButton)
+            apply_icon = krita_icon("dialog-ok-apply", qtcompat.enum_value(QStyle, "SP_DialogApplyButton"))
+            cancel_icon = krita_icon("dialog-cancel", qtcompat.enum_value(QStyle, "SP_DialogCancelButton"))
             painter.save()
             painter.setClipRect(clip_rect)
             apply_icon.paint(painter, apply_rect)
@@ -119,7 +126,7 @@ class PaintingMixin:
             # "this is the volume control" marker, tinted to match that
             # text (theme['clip_text']) rather than the icon theme's own
             # fixed color.
-            volume_icon = krita_icon("audio-volume-high", QStyle.SP_MediaVolume)
+            volume_icon = krita_icon("audio-volume-high", qtcompat.enum_value(QStyle, "SP_MediaVolume"))
             icon_pixmap = tinted_icon_pixmap(volume_icon, VOLUME_ICON_SIZE, theme['clip_text'])
             multi_point = not self._volume_is_flat(clip)
             text = self._volume_indicator_text(clip)
@@ -137,7 +144,7 @@ class PaintingMixin:
                 # (see below) -- once bend points exist, no single number
                 # represents the whole curve, so this "has a curve" glyph
                 # stands in for it at a glance.
-                curve_icon = krita_icon("curve-preset-s", QStyle.SP_FileDialogDetailedView)
+                curve_icon = krita_icon("curve-preset-s", qtcompat.enum_value(QStyle, "SP_FileDialogDetailedView"))
                 curve_pixmap = tinted_icon_pixmap(curve_icon, VOLUME_ICON_SIZE, theme['clip_text'])
                 curve_rect = QRect(icon_rect.right() + 2, icon_rect.top(), VOLUME_ICON_SIZE, VOLUME_ICON_SIZE)
                 painter.drawPixmap(curve_rect, curve_pixmap)
@@ -145,7 +152,7 @@ class PaintingMixin:
                 text_rect = QRect(icon_rect.right() + 2, indicator_rect.top(),
                                    indicator_rect.right() - icon_rect.right() - 2, indicator_rect.height())
                 painter.setPen(theme['clip_text'])
-                painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
+                painter.drawText(text_rect, qtcompat.ALIGN_VCENTER | qtcompat.ALIGN_LEFT, text)
             painter.restore()
             icons_right_edge = indicator_rect.right()
 
@@ -159,7 +166,7 @@ class PaintingMixin:
                            max(0, clip_rect.right() - 4 - text_left), clip_rect.height() - 2)
         painter.save()
         painter.setClipRect(clip_rect)
-        painter.drawText(text_rect, Qt.AlignTop | Qt.AlignLeft, clip.name)
+        painter.drawText(text_rect, qtcompat.ALIGN_TOP | qtcompat.ALIGN_LEFT, clip.name)
         painter.restore()
 
         if clip is self.volume_editing_clip:
@@ -213,7 +220,7 @@ class PaintingMixin:
                 break
             x = min(x + step, right)
 
-        painter.setPen(Qt.NoPen)
+        painter.setPen(qtcompat.NO_PEN)
         painter.setBrush(QBrush(theme['volume_line']))
         for point in points:
             screen_pos = self._volume_point_screen_pos(clip, clip_rect, point)
@@ -241,7 +248,7 @@ class PaintingMixin:
             if sel_screen_pos is not None:
                 sel_px, sel_py = sel_screen_pos
                 painter.setPen(QPen(theme['volume_point_selected'], 2))
-                painter.setBrush(Qt.NoBrush)
+                painter.setBrush(qtcompat.NO_BRUSH)
                 ring_radius = VOLUME_POINT_RADIUS + 2
                 painter.drawEllipse(QPoint(int(round(sel_px)), int(round(sel_py))), ring_radius, ring_radius)
         painter.restore()
@@ -346,7 +353,7 @@ class PaintingMixin:
             gain = points[idx][1] if points else 1.0
             text = gain_to_pct_text(gain)
             painter.fillRect(bg_rect, theme['readout_bg'])
-            painter.drawText(bg_rect, Qt.AlignCenter, text)
+            painter.drawText(bg_rect, qtcompat.ALIGN_CENTER, text)
         painter.restore()
 
     def _trimmed_peaks(self, clip):
@@ -431,9 +438,9 @@ class PaintingMixin:
             cached = tiles.get(tile_idx)
             if cached is None or cached[0] != key:
                 pixmap = QPixmap(tile_width, height)
-                pixmap.fill(Qt.transparent)
+                pixmap.fill(qtcompat.TRANSPARENT)
                 pm_painter = QPainter(pixmap)
-                pm_painter.setRenderHint(QPainter.Antialiasing)
+                pm_painter.setRenderHint(qtcompat.enum_value(QPainter, "Antialiasing"))
                 # Shifted left by tile_start (not 0) so bucket->x math
                 # inside _paint_waveform -- computed against the clip's
                 # full (unshifted) width, to keep step_px/zoom correct --

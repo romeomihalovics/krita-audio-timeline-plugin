@@ -2,13 +2,15 @@ import os
 
 from krita import DockWidget
 
-from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtGui import QTransform
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
-
+from . import qtcompat
 from .ui.timeline_widget import AudioTimelineWidget
 from .ui import docker_ui
 from .ui.docker_ui import SPINNER_SIZE, SPINNER_INTERVAL_MS, SPINNER_DEGREES_PER_TICK
+
+QTimer = qtcompat.QtCore.QTimer
+QTransform = qtcompat.QtGui.QTransform
+QFileDialog = qtcompat.QtWidgets.QFileDialog
+QMessageBox = qtcompat.QtWidgets.QMessageBox
 from .ui.mixdown_controller import MixdownController
 from .ui.state_persistence import DocStateStore
 from .ui.playback_sync import PlaybackSync
@@ -93,7 +95,7 @@ class AudioTimelineDocker(DockWidget):
     def _tick_mixdown_spinner(self):
         self._mixdown_spinner_angle = (self._mixdown_spinner_angle + SPINNER_DEGREES_PER_TICK) % 360
         transform = QTransform().rotate(self._mixdown_spinner_angle)
-        rotated = self._mixdown_spinner_pixmap.transformed(transform, Qt.SmoothTransformation)
+        rotated = self._mixdown_spinner_pixmap.transformed(transform, qtcompat.SMOOTH_TRANSFORMATION)
         # Rotating a square pixmap around its center grows the bounding box
         # on diagonal angles -- recenter it into a fixed SPINNER_SIZE canvas
         # so the icon doesn't visibly drift as it spins.
@@ -109,10 +111,10 @@ class AudioTimelineDocker(DockWidget):
 
     # -------------------------------------------------------------- updates
     def _open_settings_dialog(self):
-        SettingsDialog(self).exec_()
+        SettingsDialog(self).exec()
 
     def _open_info_dialog(self):
-        InfoDialog(self).exec_()
+        InfoDialog(self).exec()
 
     def _maybe_auto_check_for_updates(self):
         if updater.auto_check_already_done_this_session():
@@ -131,7 +133,7 @@ class AudioTimelineDocker(DockWidget):
         if info is None:
             return  # already up to date -- automatic checks are silent unless there's an update
         dialog = UpdateDialog(self, automatic=True, release_info=info)
-        dialog.exec_()
+        dialog.exec()
 
     def _on_auto_check_failed(self, _message):
         pass  # automatic checks fail silently; only the manual flow surfaces errors

@@ -1,9 +1,15 @@
-from PyQt5.QtCore import QUrl
-from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QPushButton
-
+from . import qtcompat
 from . import updater
 from .update_dialog import UpdateDialog
+
+QUrl = qtcompat.QtCore.QUrl
+QDesktopServices = qtcompat.QtGui.QDesktopServices
+QDialog = qtcompat.QtWidgets.QDialog
+QVBoxLayout = qtcompat.QtWidgets.QVBoxLayout
+QHBoxLayout = qtcompat.QtWidgets.QHBoxLayout
+QLabel = qtcompat.QtWidgets.QLabel
+QCheckBox = qtcompat.QtWidgets.QCheckBox
+QPushButton = qtcompat.QtWidgets.QPushButton
 
 
 class SettingsDialog(QDialog):
@@ -46,7 +52,7 @@ class SettingsDialog(QDialog):
 
     def _open_update_dialog(self):
         dialog = UpdateDialog(self, automatic=False)
-        dialog.exec_()
+        dialog.exec()
 
     def _open_issues_page(self, _url=None):
         QDesktopServices.openUrl(QUrl(f"https://github.com/{updater.GITHUB_REPO}/issues"))

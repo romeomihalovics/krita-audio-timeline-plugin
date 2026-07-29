@@ -1,9 +1,12 @@
 """Icon lookup/tinting helpers, cached at module level since they're
 re-invoked on every repaint of every clip/button that shows one."""
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon, QPainter, QPixmap
-from PyQt5.QtWidgets import QApplication
+from .. import qtcompat
+
+QIcon = qtcompat.QtGui.QIcon
+QPainter = qtcompat.QtGui.QPainter
+QPixmap = qtcompat.QtGui.QPixmap
+QApplication = qtcompat.QtWidgets.QApplication
 
 _icon_cache = {}
 _fps_divisors_cache = {}
@@ -58,10 +61,10 @@ def tinted_icon_pixmap(icon, size, color):
         pixmap = icon.pixmap(size, size)
         if not pixmap.isNull():
             tinted = QPixmap(pixmap.size())
-            tinted.fill(Qt.transparent)
+            tinted.fill(qtcompat.TRANSPARENT)
             painter = QPainter(tinted)
             painter.drawPixmap(0, 0, pixmap)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.setCompositionMode(qtcompat.enum_value(QPainter, "CompositionMode_SourceIn"))
             painter.fillRect(tinted.rect(), color)
             painter.end()
             pixmap = tinted

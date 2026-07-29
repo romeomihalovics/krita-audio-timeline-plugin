@@ -1,8 +1,9 @@
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPainter, QPen
-from PyQt5.QtWidgets import QWidget
-
+from .. import qtcompat
 from .timeline_constants import TRACK_HEADER_WIDTH, RULER_HEIGHT
+
+QPainter = qtcompat.QtGui.QPainter
+QPen = qtcompat.QtGui.QPen
+QWidget = qtcompat.QtWidgets.QWidget
 
 
 class AudioTimelineCornerWidget(QWidget):
@@ -42,7 +43,7 @@ class _BorderStripWidget(QWidget):
     def __init__(self, timeline, parent=None):
         super().__init__(parent)
         self.timeline = timeline
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(qtcompat.WA_TRANSPARENT_FOR_MOUSE_EVENTS)
 
     def paintEvent(self, event):
         painter = QPainter(self)

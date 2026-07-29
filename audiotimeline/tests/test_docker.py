@@ -167,13 +167,13 @@ def test_maybe_auto_check_shows_dialog_when_update_available(docker, monkeypatch
     monkeypatch.setattr(updater, "is_update_available", lambda v: True)
 
     with patch("audiotimeline.audiotimeline_docker.UpdateDialog") as mock_dialog_cls:
-        mock_dialog_cls.return_value.exec_ = MagicMock()
+        mock_dialog_cls.return_value.exec = MagicMock()
         docker._maybe_auto_check_for_updates()
 
     mock_dialog_cls.assert_called_once()
     _args, kwargs = mock_dialog_cls.call_args
     assert kwargs.get("automatic") is True or (len(_args) > 1 and _args[1] is True)
-    mock_dialog_cls.return_value.exec_.assert_called_once()
+    mock_dialog_cls.return_value.exec.assert_called_once()
 
 
 def test_maybe_auto_check_silent_when_up_to_date(docker, monkeypatch):

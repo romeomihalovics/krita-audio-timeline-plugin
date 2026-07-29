@@ -8,19 +8,20 @@ animation end-frame) and to zooming -- plus paint-time viewport culling
 
 from unittest.mock import MagicMock, patch
 
-from PyQt5.QtCore import QPoint, QPointF, QRect, Qt
+from PyQt5.QtCore import QPoint, QPointF, QRect
 from PyQt5.QtGui import QPaintEvent, QWheelEvent
 
+from .. import qtcompat
 from ..ui.header_widget import AudioTimelineHeaderWidget
 from ..ui.timeline_constants import TRACK_HEIGHT
 from ..audio.audio_track import AudioTrack
 
 
 def _wheel_event(delta, ctrl=True):
-    mods = Qt.ControlModifier if ctrl else Qt.NoModifier
+    mods = qtcompat.CONTROL_MODIFIER if ctrl else qtcompat.NO_MODIFIER
     return QWheelEvent(
         QPointF(0, 0), QPointF(0, 0), QPoint(0, 0), QPoint(0, delta),
-        Qt.NoButton, mods, Qt.NoScrollPhase, False,
+        qtcompat.NO_BUTTON, mods, qtcompat.NO_SCROLL_PHASE, False,
     )
 
 
@@ -49,10 +50,10 @@ def test_header_mute_button_toggles_via_click(timeline, qtbot):
     header.resize(200, 200)
 
     mute_rect = timeline.mute_rect_for(0)
-    qtbot.mouseClick(header, Qt.LeftButton, pos=mute_rect.center())
+    qtbot.mouseClick(header, qtcompat.LEFT_BUTTON, pos=mute_rect.center())
     assert track.muted is True
 
-    qtbot.mouseClick(header, Qt.LeftButton, pos=mute_rect.center())
+    qtbot.mouseClick(header, qtcompat.LEFT_BUTTON, pos=mute_rect.center())
     assert track.muted is False
 
 
@@ -64,7 +65,7 @@ def test_header_delete_button_removes_track_via_click(timeline, qtbot):
     header.resize(200, 200)
 
     delete_rect = timeline.delete_rect_for(0)
-    qtbot.mouseClick(header, Qt.LeftButton, pos=delete_rect.center())
+    qtbot.mouseClick(header, qtcompat.LEFT_BUTTON, pos=delete_rect.center())
     assert track not in timeline.tracks
 
     timeline.undo_stack.undo()
@@ -80,7 +81,7 @@ def test_header_click_on_name_sets_active_track(timeline, qtbot):
     header.resize(200, 200)
 
     name_pos = QPoint(10, timeline.track_y(1) + TRACK_HEIGHT // 2)
-    qtbot.mouseClick(header, Qt.LeftButton, pos=name_pos)
+    qtbot.mouseClick(header, qtcompat.LEFT_BUTTON, pos=name_pos)
     assert timeline.active_track_index == 1
 
 
@@ -93,7 +94,7 @@ def test_header_double_click_renames_track(timeline, qtbot):
 
     name_pos = QPoint(10, timeline.track_y(0) + TRACK_HEIGHT // 2)
     with patch("audiotimeline.ui.header_widget.QInputDialog.getText", return_value=("Renamed", True)):
-        qtbot.mouseDClick(header, Qt.LeftButton, pos=name_pos)
+        qtbot.mouseDClick(header, qtcompat.LEFT_BUTTON, pos=name_pos)
     assert track.name == "Renamed"
 
     timeline.undo_stack.undo()
@@ -109,7 +110,7 @@ def test_header_double_click_cancelled_does_not_rename(timeline, qtbot):
 
     name_pos = QPoint(10, timeline.track_y(0) + TRACK_HEIGHT // 2)
     with patch("audiotimeline.ui.header_widget.QInputDialog.getText", return_value=("Renamed", False)):
-        qtbot.mouseDClick(header, Qt.LeftButton, pos=name_pos)
+        qtbot.mouseDClick(header, qtcompat.LEFT_BUTTON, pos=name_pos)
     assert track.name == "Old Name"
 
 
@@ -122,7 +123,7 @@ def test_header_double_click_on_mute_button_does_not_rename(timeline, qtbot):
 
     mute_rect = timeline.mute_rect_for(0)
     with patch("audiotimeline.ui.header_widget.QInputDialog.getText", return_value=("Renamed", True)) as mocked:
-        qtbot.mouseDClick(header, Qt.LeftButton, pos=mute_rect.center())
+        qtbot.mouseDClick(header, qtcompat.LEFT_BUTTON, pos=mute_rect.center())
     mocked.assert_not_called()
     assert track.name == "Old Name"
 
