@@ -40,6 +40,7 @@ engine; update Krita to fix this.
 - **Windows 11**, Krita 6.0.3
 - **Ubuntu 24.04.4**, Krita 5.3.2.1
 - **Ubuntu 24.04.4**, Krita 6.0.3
+- **MacOS 26.6**, Krita 5.3.3
 
 ## Features
 
