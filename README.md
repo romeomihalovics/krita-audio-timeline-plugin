@@ -28,7 +28,7 @@ engine; update Krita to fix this.
    copy, delete it first (see Troubleshooting).
 3. Restart Krita.
 4. **Settings → Configure Krita… → Python Plugin Manager** → tick
-   "Audio Timeline" → restart Krita again.
+   "Audio Timeline" → restart Krita again. _(On MacOS you should click the "Krita" option in the toolbar, go to "Preferences" and you will find the Plugin Manager there)_
 5. **Settings → Dockers → Audio Timeline** to show the panel.
 6. Before you start using it, read [Known limitations](#known-limitations)
    — a couple of Krita's own behaviors around playback and scrubbing are
